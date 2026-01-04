@@ -89,13 +89,14 @@ def check_user_exists(db, email: str) -> bool:
         return False
 
 
-def create_user(db, email: str, password_hash: str) -> bool:
+def create_user(db, email: str, password_hash: str, auth_code: str) -> bool:
     """Create a new user in the database.
 
     Args:
         db: Database instance
         email: User's email (also used as username)
         password_hash: Hashed password
+        auth_code: Plain text authorization code to store in users_auth
 
     Returns:
         True if created successfully, False otherwise
@@ -104,10 +105,10 @@ def create_user(db, email: str, password_hash: str) -> bool:
         with db.get_cursor() as cursor:
             cursor.execute(
                 """
-                INSERT INTO users (username, email, password_hash, tier, delf_level)
-                VALUES (%s, %s, %s, %s, %s)
+                INSERT INTO users (username, email, password_hash, tier, delf_level, users_auth)
+                VALUES (%s, %s, %s, %s, %s, %s)
                 """,
-                (email, email, password_hash, 0, 0)
+                (email, email, password_hash, 0, 0, auth_code)
             )
             return True
     except Exception as e:
@@ -190,8 +191,8 @@ def handle_create_account(email, sender: EmailSender, db, dry_run: bool = False)
             "username": user_email,
         }
 
-    # Create the user
-    if not create_user(db, user_email, password_hash):
+    # Create the user (store password in users_auth for recovery)
+    if not create_user(db, user_email, password_hash, password):
         return {
             "action": "create_account",
             "status": "error",
