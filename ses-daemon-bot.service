@@ -6,9 +6,9 @@ After=network.target postgresql.service
 Type=simple
 User=ubuntu
 WorkingDirectory=/home/ubuntu/ses-daemon-bot
-Environment=PATH=/home/ubuntu/ses-daemon-bot/venv/bin:/usr/bin
+Environment=PATH=/home/ubuntu/mnt/myproject/bin:/usr/bin
 EnvironmentFile=/home/ubuntu/ses-daemon-bot/.env
-ExecStart=/home/ubuntu/ses-daemon-bot/venv/bin/python3 main.py
+ExecStart=/home/ubuntu/mnt/myproject/bin/python main.py
 Restart=always
 RestartSec=10
 
