@@ -147,11 +147,12 @@ Email message:
 
 Return the JSON array now."""
 
-    def classify(self, email_text: str) -> ClassificationResult:
+    def classify(self, email_text: str, max_retries: int = 2) -> ClassificationResult:
         """Classify the intent of an email.
 
         Args:
             email_text: The email content to classify.
+            max_retries: Maximum number of attempts on invalid response.
 
         Returns:
             ClassificationResult with the determined intent.
@@ -159,31 +160,72 @@ Return the JSON array now."""
         # Build the prompt
         prompt = self.prompt_template.replace("{EMAIL_TEXT}", email_text)
 
+        for attempt in range(max_retries):
+            try:
+                # Call the LLM
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0,  # Deterministic output
+                    max_tokens=50,  # Short response expected
+                )
+
+                raw_response = response.choices[0].message.content.strip()
+                logger.debug(f"LLM response (attempt {attempt + 1}): {raw_response}")
+
+                # Parse the response
+                result = self._parse_response(raw_response, retry_on_invalid=False)
+
+                # Check if response was valid (not defaulted to unknown due to invalid format)
+                if self._is_valid_response(raw_response):
+                    return result
+
+                # Invalid response, retry if we have attempts left
+                if attempt < max_retries - 1:
+                    logger.warning(f"Invalid LLM response, retrying (attempt {attempt + 2}/{max_retries})")
+                    continue
+
+                # Last attempt, return whatever we got
+                return result
+
+            except Exception as e:
+                logger.error(f"Classification error: {e}")
+                if attempt < max_retries - 1:
+                    logger.warning(f"Retrying after error (attempt {attempt + 2}/{max_retries})")
+                    continue
+                # Return unknown intent on final error
+                return ClassificationResult(
+                    intent=Intent.UNKNOWN,
+                    intent_flags=[False, False, True, False, False, False, False, False],
+                    raw_response=str(e),
+                )
+
+        # Should not reach here, but just in case
+        return ClassificationResult(
+            intent=Intent.UNKNOWN,
+            intent_flags=[False, False, True, False, False, False, False, False],
+            raw_response="max retries exceeded",
+        )
+
+    def _is_valid_response(self, raw_response: str) -> bool:
+        """Check if an LLM response is valid (exactly 1 true value).
+
+        Args:
+            raw_response: The raw LLM response string.
+
+        Returns:
+            True if valid, False otherwise.
+        """
         try:
-            # Call the LLM
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0,  # Deterministic output
-                max_tokens=50,  # Short response expected
-            )
+            intent_flags = json.loads(raw_response)
+            if not isinstance(intent_flags, list) or len(intent_flags) != 8:
+                return False
+            true_count = sum(bool(x) for x in intent_flags)
+            return true_count == 1
+        except Exception:
+            return False
 
-            raw_response = response.choices[0].message.content.strip()
-            logger.debug(f"LLM response: {raw_response}")
-
-            # Parse the response
-            return self._parse_response(raw_response)
-
-        except Exception as e:
-            logger.error(f"Classification error: {e}")
-            # Return unknown intent on error
-            return ClassificationResult(
-                intent=Intent.UNKNOWN,
-                intent_flags=[False, False, True, False, False, False, False, False],
-                raw_response=str(e),
-            )
-
-    def _parse_response(self, raw_response: str) -> ClassificationResult:
+    def _parse_response(self, raw_response: str, retry_on_invalid: bool = True) -> ClassificationResult:
         """Parse the LLM response into a ClassificationResult.
 
         Args:
