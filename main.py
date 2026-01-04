@@ -318,12 +318,12 @@ def process_single_email(email, ses_client, classifier, db, email_sender=None, w
                 )
                 ses_client.mark_processed(email.s3_key)
 
-                # Mark as read in WorkMail
+                # Delete from WorkMail (bounce notifications don't need to be kept)
                 if workmail_client and email.message_id:
-                    if workmail_client.mark_as_read_by_message_id(email.message_id):
-                        logger.debug(f"Marked bounce as read in WorkMail: {email.message_id}")
+                    if workmail_client.delete_by_message_id(email.message_id):
+                        logger.debug(f"Deleted bounce from WorkMail: {email.message_id}")
                     else:
-                        logger.warning(f"Failed to mark bounce as read in WorkMail: {email.message_id}")
+                        logger.warning(f"Failed to delete bounce from WorkMail: {email.message_id}")
 
             return True
 
@@ -348,12 +348,12 @@ def process_single_email(email, ses_client, classifier, db, email_sender=None, w
                 )
                 ses_client.mark_processed(email.s3_key)
 
-                # Mark as read in WorkMail
+                # Delete from WorkMail (complaint notifications don't need to be kept)
                 if workmail_client and email.message_id:
-                    if workmail_client.mark_as_read_by_message_id(email.message_id):
-                        logger.debug(f"Marked complaint as read in WorkMail: {email.message_id}")
+                    if workmail_client.delete_by_message_id(email.message_id):
+                        logger.debug(f"Deleted complaint from WorkMail: {email.message_id}")
                     else:
-                        logger.warning(f"Failed to mark complaint as read in WorkMail: {email.message_id}")
+                        logger.warning(f"Failed to delete complaint from WorkMail: {email.message_id}")
 
             return True
 
