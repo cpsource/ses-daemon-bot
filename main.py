@@ -298,7 +298,7 @@ def process_single_email(email, ses_client, classifier, db, email_sender=None, w
             return True
 
         # Step 2.5: Check for bounce notifications and blacklist bounced addresses
-        bounce_result = handle_bounce(email, db, dry_run)
+        bounce_result = handle_bounce(email, db, dry_run, email_sender)
         if bounce_result:
             # This is a bounce notification - store it with special handling
             if not dry_run:

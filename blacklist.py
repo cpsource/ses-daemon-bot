@@ -10,6 +10,9 @@ from typing import Optional
 
 logger = logging.getLogger("ses-daemon-bot")
 
+ADMIN_EMAIL = "page.cal@gmail.com"
+FROM_EMAIL = "admin@frflashy.com"
+
 
 def is_bounce_notification(sender: str, subject: str) -> bool:
     """Check if an email is a bounce/delivery failure notification.
@@ -181,6 +184,66 @@ def extract_bounced_email(email_body: str, raw_content: bytes = None) -> Optiona
     return None
 
 
+def check_user_exists(db, email_addr: str) -> bool:
+    """Check if an email address exists in the users table.
+
+    Args:
+        db: Database instance
+        email_addr: Email address to check
+
+    Returns:
+        True if user exists, False otherwise
+    """
+    try:
+        with db.get_cursor() as cursor:
+            cursor.execute(
+                "SELECT id FROM users WHERE email = %s OR username = %s",
+                (email_addr, email_addr)
+            )
+            result = cursor.fetchone()
+            return result is not None
+    except Exception as e:
+        logger.error(f"Error checking user existence: {e}")
+        return False
+
+
+def notify_admin_bounced_user(email_sender, bounced_addr: str, original_subject: str) -> bool:
+    """Send notification to admin about a bounced user.
+
+    Args:
+        email_sender: EmailSender instance
+        bounced_addr: The bounced email address
+        original_subject: Subject of the bounce notification
+
+    Returns:
+        True if notification sent successfully
+    """
+    subject = f"Bounce alert: User in database - {bounced_addr}"
+    body = f"""A delivery failure notification was received for an email address that exists in the users table.
+
+Bounced email: {bounced_addr}
+Original bounce subject: {original_subject}
+
+This user may need to be contacted through alternative means or removed from the database.
+
+Note: The user has NOT been automatically removed. Manual review is required.
+"""
+
+    result = email_sender.send_email(
+        to_addr=ADMIN_EMAIL,
+        from_addr=FROM_EMAIL,
+        subject=subject,
+        body=body,
+    )
+
+    if result["success"]:
+        logger.info(f"Sent admin notification for bounced user: {bounced_addr}")
+        return True
+    else:
+        logger.warning(f"Failed to notify admin about bounced user: {result['error']}")
+        return False
+
+
 def add_to_blacklist(db, email_addr: str, reason: str = "SES bounce notification",
                      source: str = "ses-daemon-bot") -> Optional[dict]:
     """Add an email address to the email_blacklist table.
@@ -216,13 +279,14 @@ def add_to_blacklist(db, email_addr: str, reason: str = "SES bounce notification
         return None
 
 
-def handle_bounce(email, db, dry_run: bool = False) -> Optional[dict]:
+def handle_bounce(email, db, dry_run: bool = False, email_sender=None) -> Optional[dict]:
     """Handle a bounce notification by extracting and blacklisting the bounced address.
 
     Args:
         email: Email object from SESClient
         db: Database instance
         dry_run: If True, don't actually modify the database
+        email_sender: EmailSender instance (optional, for admin notifications)
 
     Returns:
         Dict with bounce handling result, or None if not a bounce
@@ -247,12 +311,26 @@ def handle_bounce(email, db, dry_run: bool = False) -> Optional[dict]:
 
     logger.info(f"Extracted bounced email: {bounced_addr}")
 
+    # Check if bounced address exists in users table
+    user_exists = check_user_exists(db, bounced_addr)
+    admin_notified = False
+
+    if user_exists:
+        logger.warning(f"Bounced email exists in users table: {bounced_addr}")
+        if email_sender and not dry_run:
+            admin_notified = notify_admin_bounced_user(
+                email_sender, bounced_addr, email.subject or "(no subject)"
+            )
+        elif dry_run:
+            logger.info(f"[DRY-RUN] Would notify admin about bounced user: {bounced_addr}")
+
     if dry_run:
         logger.info(f"[DRY-RUN] Would blacklist: {bounced_addr}")
         return {
             "is_bounce": True,
             "extracted_email": bounced_addr,
             "blacklisted": False,
+            "user_in_database": user_exists,
             "dry_run": True
         }
 
@@ -270,12 +348,16 @@ def handle_bounce(email, db, dry_run: bool = False) -> Optional[dict]:
             "extracted_email": bounced_addr,
             "blacklisted": True,
             "inserted": result["inserted"],
-            "access_cnt": result["access_cnt"]
+            "access_cnt": result["access_cnt"],
+            "user_in_database": user_exists,
+            "admin_notified": admin_notified
         }
     else:
         return {
             "is_bounce": True,
             "extracted_email": bounced_addr,
             "blacklisted": False,
+            "user_in_database": user_exists,
+            "admin_notified": admin_notified,
             "error": "Failed to add to blacklist"
         }
