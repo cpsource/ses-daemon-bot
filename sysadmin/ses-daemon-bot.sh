@@ -22,8 +22,11 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
+# S3 bucket for email history
+SES_BUCKET="frflashy-ses-incoming"
+
 usage() {
-    echo "Usage: $0 {start|stop|restart|status|logs|test-creds|test-ses}"
+    echo "Usage: $0 {start|stop|restart|status|logs|test-creds|test-ses|history}"
     echo ""
     echo "Commands:"
     echo "  start       Start the daemon"
@@ -33,6 +36,7 @@ usage() {
     echo "  logs        Tail the log file"
     echo "  test-creds  Validate credentials"
     echo "  test-ses    Test SES/S3 connection (read emails)"
+    echo "  history     List processed emails from S3"
     exit 1
 }
 
@@ -171,6 +175,18 @@ do_test_ses() {
     $PYTHON "$DAEMON_SCRIPT" --config "$CONFIG_FILE" --test-ses
 }
 
+do_history() {
+    echo "Processed emails in S3:"
+    echo "----------------------------------------"
+    aws s3 ls "s3://${SES_BUCKET}/processed/" --human-readable
+    echo ""
+    echo "Pending emails:"
+    aws s3 ls "s3://${SES_BUCKET}/emails/" --human-readable 2>/dev/null || echo "  (none)"
+    echo ""
+    echo "Failed emails:"
+    aws s3 ls "s3://${SES_BUCKET}/failed/" --human-readable 2>/dev/null || echo "  (none)"
+}
+
 # Main
 case "${1:-}" in
     start)
@@ -193,6 +209,9 @@ case "${1:-}" in
         ;;
     test-ses)
         do_test_ses
+        ;;
+    history)
+        do_history
         ;;
     *)
         usage
