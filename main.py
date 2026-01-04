@@ -149,6 +149,11 @@ Examples:
         action="store_true",
         help="Test that all required credentials are configured, then exit",
     )
+    parser.add_argument(
+        "--test-ses",
+        action="store_true",
+        help="Read and display emails from S3 bucket (non-destructive), then exit",
+    )
     return parser.parse_args()
 
 
@@ -201,6 +206,66 @@ def check_credentials(config):
         success.append(f"LLM_MODEL: {config.llm.model}")
 
     return errors, warnings, success
+
+
+def test_ses_connection(config):
+    """Test SES/S3 connection by reading and displaying emails.
+
+    Non-destructive: only reads emails, does not move or delete them.
+    """
+    from ses_client import SESClient
+
+    print(f"Connecting to S3 bucket: {config.aws.ses_bucket}")
+    print(f"Region: {config.aws.region}")
+    print("=" * 60)
+
+    try:
+        client = SESClient(config.aws)
+
+        # Get counts
+        counts = client.get_email_count_by_prefix()
+        print(f"Email counts:")
+        print(f"  Incoming:  {counts['incoming']}")
+        print(f"  Processed: {counts['processed']}")
+        print(f"  Failed:    {counts['failed']}")
+        print("=" * 60)
+
+        # List and display pending emails
+        pending_keys = list(client.list_pending_emails())
+
+        if not pending_keys:
+            print("No pending emails in inbox.")
+            return
+
+        print(f"\nPending emails ({len(pending_keys)}):\n")
+
+        for i, s3_key in enumerate(pending_keys, 1):
+            print(f"--- Email {i}/{len(pending_keys)} ---")
+            print(f"S3 Key: {s3_key}")
+
+            email = client.fetch_email(s3_key)
+            if email:
+                print(f"Message-ID: {email.message_id}")
+                print(f"From: {email.sender_name} <{email.sender}>" if email.sender_name else f"From: {email.sender}")
+                print(f"To: {email.recipient}")
+                print(f"Subject: {email.subject}")
+                print(f"Date: {email.received_at}")
+                print(f"Body ({len(email.body)} chars):")
+                # Show first 500 chars of body
+                body_preview = email.body[:500]
+                if len(email.body) > 500:
+                    body_preview += "..."
+                print("-" * 40)
+                print(body_preview)
+                print("-" * 40)
+            else:
+                print("  [Failed to parse email]")
+
+            print()
+
+    except Exception as e:
+        print(f"ERROR: {e}")
+        raise
 
 
 def process_emails(dry_run=False):
@@ -275,6 +340,11 @@ def main():
         else:
             print("SUCCESS: All required credentials configured")
             sys.exit(0)
+
+    # Handle --test-ses: read and display emails from S3
+    if args.test_ses:
+        test_ses_connection(config)
+        sys.exit(0)
 
     # Command line args override config file settings
     log_file = args.log_file or config.daemon.log_file
