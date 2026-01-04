@@ -111,3 +111,22 @@ Mike""",
             f"Expected email_to_human, got {result.intent_label}"
         )
         assert result.intent_flags[4] is True  # email_to_human is index 4
+
+    def test_spam_or_auto_reply_intent(self, classifier):
+        """Out-of-office or auto-reply should return spam_or_auto_reply intent."""
+        result = classifier.classify_with_context(
+            subject="Out of Office: Re: Your inquiry",
+            body="""I am currently out of the office with limited access to email.
+
+I will return on Monday, January 10th.
+
+For urgent matters, please contact support@example.com.
+
+This is an automated response.""",
+            sender="vacation@example.com",
+        )
+
+        assert result.intent == Intent.SPAM_OR_AUTO_REPLY, (
+            f"Expected spam_or_auto_reply, got {result.intent_label}"
+        )
+        assert result.intent_flags[5] is True  # spam_or_auto_reply is index 5

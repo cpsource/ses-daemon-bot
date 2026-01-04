@@ -311,7 +311,7 @@ def process_single_email(email, ses_client, classifier, db, email_sender=None, w
                     subject=email.subject,
                     body=email.body,
                     received_at=email.received_at,
-                    intent_flags=[False, False, False, False, False, False],  # No intent classification
+                    intent_flags=[False, False, False, False, False, False, False],  # No intent classification
                     intent_label="bounce_notification",
                     handler_result=bounce_result,
                     status="processed",
@@ -458,6 +458,12 @@ def route_to_handler(intent, email, email_sender=None, db=None, dry_run=False):
             handler_result["action"] = "unknown"
             handler_result["status"] = "error"
             handler_result["error"] = "EmailSender not configured"
+
+    elif intent == Intent.SPAM_OR_AUTO_REPLY:
+        # Silently ignore spam and auto-replies to avoid email loops
+        logger.info(f"Ignoring spam/auto-reply from {email.sender}")
+        handler_result["action"] = "ignore"
+        handler_result["status"] = "ignored"
 
     else:
         # Reserved or unexpected
