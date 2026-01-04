@@ -28,7 +28,7 @@ def test_version_option():
     )
     assert result.returncode == 0
     assert "ses-daemon-bot" in result.stdout
-    assert "0.1.0" in result.stdout
+    assert "0.1.1" in result.stdout
 
 
 def test_dry_run_with_once():
