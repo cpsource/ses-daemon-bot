@@ -16,6 +16,7 @@ from classifier import Classifier
 from db import Database
 from blacklist import handle_bounce
 from workmail import WorkMailClient
+from handlers import EmailSender, handle_send_info
 
 __version__ = "0.1.0"
 
@@ -273,7 +274,7 @@ def test_ses_connection(config):
         raise
 
 
-def process_single_email(email, ses_client, classifier, db, workmail_client=None, dry_run=False):
+def process_single_email(email, ses_client, classifier, db, email_sender=None, workmail_client=None, dry_run=False):
     """Process a single email through classification and handling.
 
     Args:
@@ -281,6 +282,7 @@ def process_single_email(email, ses_client, classifier, db, workmail_client=None
         ses_client: SESClient instance
         classifier: Classifier instance
         db: Database instance
+        email_sender: EmailSender instance (optional)
         workmail_client: WorkMailClient instance (optional)
         dry_run: If True, don't modify S3 or send responses
 
@@ -343,6 +345,7 @@ def process_single_email(email, ses_client, classifier, db, workmail_client=None
         handler_result = route_to_handler(
             intent=result.intent,
             email=email,
+            email_sender=email_sender,
             dry_run=dry_run,
         )
 
@@ -385,12 +388,13 @@ def process_single_email(email, ses_client, classifier, db, workmail_client=None
         return False
 
 
-def route_to_handler(intent, email, dry_run=False):
+def route_to_handler(intent, email, email_sender=None, dry_run=False):
     """Route email to appropriate handler based on intent.
 
     Args:
         intent: Intent enum value
         email: Email object
+        email_sender: EmailSender instance (optional)
         dry_run: If True, don't take real actions
 
     Returns:
@@ -404,10 +408,14 @@ def route_to_handler(intent, email, dry_run=False):
     }
 
     if intent == Intent.SEND_INFO:
-        # TODO: Implement send_info handler (auto-reply with info)
         logger.debug(f"Handler: send_info for {email.sender}")
-        handler_result["action"] = "send_info"
-        handler_result["status"] = "pending_implementation"
+        if email_sender:
+            handler_result = handle_send_info(email, email_sender, dry_run)
+            handler_result["intent"] = intent.label
+        else:
+            handler_result["action"] = "send_info"
+            handler_result["status"] = "error"
+            handler_result["error"] = "EmailSender not configured"
 
     elif intent == Intent.CREATE_ACCOUNT:
         # TODO: Implement create_account handler (CRM task creation)
@@ -436,13 +444,14 @@ def route_to_handler(intent, email, dry_run=False):
     return handler_result
 
 
-def process_emails(ses_client, classifier, db, workmail_client=None, dry_run=False):
+def process_emails(ses_client, classifier, db, email_sender=None, workmail_client=None, dry_run=False):
     """Process a single batch of emails.
 
     Args:
         ses_client: SESClient instance
         classifier: Classifier instance
         db: Database instance
+        email_sender: EmailSender instance (optional)
         workmail_client: WorkMailClient instance (optional)
         dry_run: If True, don't modify anything
 
@@ -471,7 +480,7 @@ def process_emails(ses_client, classifier, db, workmail_client=None, dry_run=Fal
             continue
 
         # Process the email
-        if process_single_email(email, ses_client, classifier, db, workmail_client, dry_run):
+        if process_single_email(email, ses_client, classifier, db, email_sender, workmail_client, dry_run):
             processed_count += 1
 
     return processed_count
@@ -491,6 +500,9 @@ def run(args, config):
 
     logger.info("Initializing database...")
     db = Database(config.database)
+
+    logger.info("Initializing email sender...")
+    email_sender = EmailSender(config.aws)
 
     # Initialize WorkMail client (optional - for marking emails as read)
     workmail_client = None
@@ -537,7 +549,7 @@ def run(args, config):
     try:
         while running:
             try:
-                count = process_emails(ses_client, classifier, db, workmail_client, dry_run=args.dry_run)
+                count = process_emails(ses_client, classifier, db, email_sender, workmail_client, dry_run=args.dry_run)
                 if count > 0:
                     logger.info(f"Processed {count} email(s)")
             except Exception as e:
