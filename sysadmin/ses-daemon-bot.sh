@@ -176,6 +176,22 @@ do_test_ses() {
 }
 
 do_history() {
+    local key="${1:-}"
+
+    if [ -n "$key" ]; then
+        # Show specific email - try processed, then pending, then failed
+        for prefix in processed emails failed; do
+            if aws s3 ls "s3://${SES_BUCKET}/${prefix}/${key}" >/dev/null 2>&1; then
+                echo "Email: s3://${SES_BUCKET}/${prefix}/${key}"
+                echo "----------------------------------------"
+                aws s3 cp "s3://${SES_BUCKET}/${prefix}/${key}" -
+                return 0
+            fi
+        done
+        echo "Email not found: $key"
+        return 1
+    fi
+
     echo "Processed emails in S3:"
     echo "----------------------------------------"
     aws s3 ls "s3://${SES_BUCKET}/processed/" --human-readable
@@ -185,6 +201,8 @@ do_history() {
     echo ""
     echo "Failed emails:"
     aws s3 ls "s3://${SES_BUCKET}/failed/" --human-readable 2>/dev/null || echo "  (none)"
+    echo ""
+    echo "To view an email: $0 history <key>"
 }
 
 # Main
@@ -211,7 +229,7 @@ case "${1:-}" in
         do_test_ses
         ;;
     history)
-        do_history
+        do_history "${2:-}"
         ;;
     *)
         usage
