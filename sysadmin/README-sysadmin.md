@@ -30,6 +30,8 @@ ses-daemon-bot status      # Check status
 ses-daemon-bot logs        # Tail log file
 ses-daemon-bot test-creds  # Validate credentials
 ses-daemon-bot test-ses    # Test S3/SES connection
+ses-daemon-bot history     # List processed emails from S3
+ses-daemon-bot history <key>  # View specific email content
 ```
 
 ### systemd Integration
@@ -242,6 +244,30 @@ exit 0
 ```bash
 # Check every 5 minutes, restart if not running
 */5 * * * * systemctl is-active --quiet ses-daemon-bot || systemctl start ses-daemon-bot
+```
+
+## Email History
+
+Processed emails are stored in S3 bucket `frflashy-ses-incoming` under these prefixes:
+
+| Prefix | Description |
+|--------|-------------|
+| `emails/` | Pending (incoming) emails |
+| `processed/` | Successfully processed emails |
+| `failed/` | Emails that failed processing |
+
+### View Email History
+
+```bash
+# List all emails (processed, pending, failed)
+ses-daemon-bot history
+
+# View a specific email by key
+ses-daemon-bot history 14vdm81iuorc3oaivd6n6b8gkd1ebo2aatjf9ig1
+
+# Or use AWS CLI directly
+aws s3 ls s3://frflashy-ses-incoming/processed/
+aws s3 cp s3://frflashy-ses-incoming/processed/<key> -
 ```
 
 ## Backup

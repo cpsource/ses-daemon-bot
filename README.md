@@ -88,6 +88,15 @@ sudo systemctl enable ses-daemon-bot
 sudo systemctl start ses-daemon-bot
 ```
 
+### View email history
+```bash
+# List all processed emails
+./sysadmin/ses-daemon-bot.sh history
+
+# View specific email
+./sysadmin/ses-daemon-bot.sh history <key>
+```
+
 ## Database Schema
 
 ```sql
