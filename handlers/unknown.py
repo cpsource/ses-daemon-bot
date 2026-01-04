@@ -7,11 +7,13 @@ from .base import EmailSender
 
 logger = logging.getLogger("ses-daemon-bot")
 
-TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
+# Admin email for forwarding unknown messages
+ADMIN_EMAIL = "page.cal@gmail.com"
+FROM_EMAIL = "admin@frflashy.com"
 
 
 def handle_unknown(email, sender: EmailSender, dry_run: bool = False) -> dict:
-    """Handle unknown intent by sending a fallback reply with info content.
+    """Handle unknown intent by forwarding to admin for review.
 
     Args:
         email: Email object from SESClient
@@ -21,92 +23,41 @@ def handle_unknown(email, sender: EmailSender, dry_run: bool = False) -> dict:
     Returns:
         Dict with handler result
     """
-    # Load unknown template
-    template_path = TEMPLATES_DIR / "unknown.template"
-    # Reuse send_info.txt content
-    content_path = TEMPLATES_DIR / "send_info.txt"
+    subject = f"Unknown message received by {FROM_EMAIL}"
 
-    if not template_path.exists():
-        logger.error(f"Template not found: {template_path}")
-        return {
-            "action": "unknown",
-            "status": "error",
-            "error": "Failed to load template",
-        }
+    forward_body = f"""An unknown message has been received by {FROM_EMAIL}.
 
-    if not content_path.exists():
-        logger.error(f"Content file not found: {content_path}")
-        return {
-            "action": "unknown",
-            "status": "error",
-            "error": "Failed to load content",
-        }
+From: {email.sender}
+Subject: {email.subject}
+Received: {email.received_at}
 
-    try:
-        template = template_path.read_text()
-        content = content_path.read_text()
+--- Original Message ---
 
-        # Parse template
-        if "---" not in template:
-            return {
-                "action": "unknown",
-                "status": "error",
-                "error": "Invalid template format",
-            }
-
-        header_section, body_template = template.split("---", 1)
-
-        # Parse From header
-        from_addr = None
-        for line in header_section.strip().split("\n"):
-            if line.lower().startswith("from:"):
-                from_addr = line.split(":", 1)[1].strip()
-
-        if not from_addr:
-            return {
-                "action": "unknown",
-                "status": "error",
-                "error": "No From address in template",
-            }
-
-        # Insert content into body
-        body = body_template.replace("{BODY_CONTENT}", content).strip()
-
-    except Exception as e:
-        logger.error(f"Error loading unknown template: {e}")
-        return {
-            "action": "unknown",
-            "status": "error",
-            "error": str(e),
-        }
-
-    # Use original subject for reply
-    reply_subject = email.subject or "Your inquiry"
+{email.body}
+"""
 
     if dry_run:
-        logger.info(f"[DRY-RUN] Would reply (unknown) to {email.sender} re: {reply_subject}")
+        logger.info(f"[DRY-RUN] Would forward unknown email to {ADMIN_EMAIL}")
         return {
             "action": "unknown",
             "status": "dry_run",
-            "to": email.sender,
-            "subject": f"Re: {reply_subject}",
+            "forwarded_to": ADMIN_EMAIL,
         }
 
-    # Send reply
-    result = sender.send_reply(
-        to_addr=email.sender,
-        from_addr=from_addr,
-        subject=reply_subject,
-        body=body,
-        in_reply_to=email.message_id,
+    # Forward to admin
+    result = sender.send_email(
+        to_addr=ADMIN_EMAIL,
+        from_addr=FROM_EMAIL,
+        subject=subject,
+        body=forward_body,
     )
 
     if result["success"]:
+        logger.info(f"Forwarded unknown email to {ADMIN_EMAIL}")
         return {
             "action": "unknown",
-            "status": "sent",
-            "to": email.sender,
-            "subject": f"Re: {reply_subject}",
+            "status": "forwarded",
+            "forwarded_to": ADMIN_EMAIL,
             "message_id": result["message_id"],
         }
     else:
