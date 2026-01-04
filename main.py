@@ -14,6 +14,7 @@ from config import load_config
 from ses_client import SESClient
 from classifier import Classifier
 from db import Database
+from blacklist import handle_bounce
 
 __version__ = "0.1.0"
 
@@ -290,6 +291,29 @@ def process_single_email(email, ses_client, classifier, db, dry_run=False):
             logger.debug(f"Email {email.message_id} already processed, skipping")
             if not dry_run:
                 ses_client.mark_processed(email.s3_key)
+            return True
+
+        # Step 2.5: Check for bounce notifications and blacklist bounced addresses
+        bounce_result = handle_bounce(email, db, dry_run)
+        if bounce_result:
+            # This is a bounce notification - store it with special handling
+            if not dry_run:
+                db.save_email(
+                    message_id=email.message_id,
+                    s3_key=email.s3_key,
+                    sender=email.sender,
+                    sender_name=email.sender_name,
+                    recipient=email.recipient,
+                    subject=email.subject,
+                    body=email.body,
+                    received_at=email.received_at,
+                    intent_flags=[False, False, False, False, False],  # No intent classification
+                    intent_label="bounce_notification",
+                    handler_result=bounce_result,
+                    status="processed",
+                )
+                ses_client.mark_processed(email.s3_key)
+
             return True
 
         # Classify intent
