@@ -1,0 +1,16 @@
+[Unit]
+Description=SES Daemon Bot - AWS SES mail processor for FrFlashy.com
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/ses-daemon-bot
+Environment=PATH=/home/ubuntu/ses-daemon-bot/venv/bin:/usr/bin
+EnvironmentFile=/home/ubuntu/ses-daemon-bot/.env
+ExecStart=/home/ubuntu/ses-daemon-bot/venv/bin/python3 main.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

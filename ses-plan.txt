@@ -1,0 +1,91 @@
+SES DAEMON BOT - Intent Classification Plan
+============================================
+
+Intent Definitions (fixed index positions)
+------------------------------------------
+Index   Intent              Meaning
+0       send_info           User wants information, pricing, explanation, docs
+1       create_account      User wants to sign up, register, start trial
+2       unknown             Intent cannot be confidently determined
+3       speak_to_human      User asks for a person, call, support, human
+4       reserved            Reserved for future use (always false for now)
+
+
+Engineered Prompt (copy-paste ready)
+------------------------------------
+You are an intent classification engine.
+
+You will be given an email message sent to me.
+Your task is to determine the sender's primary intent.
+
+You MUST return a single JSON array of exactly 5 items.
+Each item corresponds to a fixed intent slot.
+
+Intent slots (fixed order):
+0 = send_info
+1 = create_account
+2 = unknown
+3 = speak_to_human
+4 = reserved_for_future
+
+Rules:
+- Exactly ONE item must be true.
+- All other items must be false.
+- If the intent is unclear or ambiguous, set index 2 (unknown) to true.
+- Index 4 must always be false.
+- Do NOT include any explanation or extra text.
+- Output MUST be valid JSON only.
+
+Classify based solely on the email content.
+
+Email message:
+<<<
+{EMAIL_TEXT}
+>>>
+
+Return the JSON array now.
+
+
+Example Outputs
+---------------
+Example 1 - Asking for pricing
+[true, false, false, false, false]
+
+Example 2 - "How do I sign up?"
+[false, true, false, false, false]
+
+Example 3 - Vague or unclear email
+[false, false, true, false, false]
+
+Example 4 - "Can someone call me?"
+[false, false, false, true, false]
+
+
+Notes for Your Stack
+--------------------
+Given your PostgreSQL / Flask / AWS / frflashy.com ecosystem:
+
+- This format is perfect for direct storage in a jsonb column
+- Works cleanly with:
+    intent_flags jsonb NOT NULL
+- Allows fast routing:
+    - auto-reply
+    - CRM task
+    - human escalation
+- Zero post-processing required
+
+
+Optional Enhancements
+---------------------
+- Confidence score (intent_confidence)
+- Secondary intent fallback
+- Multi-language email handling (FR / EN)
+- Keyword trace for audit/debug
+- Mapping to internal workflow IDs
+
+
+Implementation Options
+----------------------
+- Convert this into a system message + user message format
+- Wrap it in a Python / LangChain / OpenAI SDK call
+- Add a unit test harness for validation
