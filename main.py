@@ -16,7 +16,7 @@ from classifier import Classifier
 from db import Database
 from blacklist import handle_bounce
 from workmail import WorkMailClient
-from handlers import EmailSender, handle_send_info, handle_unknown, handle_speak_to_human, handle_email_to_human
+from handlers import EmailSender, handle_send_info, handle_unknown, handle_speak_to_human, handle_email_to_human, handle_create_account
 
 __version__ = "0.1.0"
 
@@ -346,6 +346,7 @@ def process_single_email(email, ses_client, classifier, db, email_sender=None, w
             intent=result.intent,
             email=email,
             email_sender=email_sender,
+            db=db,
             dry_run=dry_run,
         )
 
@@ -388,13 +389,14 @@ def process_single_email(email, ses_client, classifier, db, email_sender=None, w
         return False
 
 
-def route_to_handler(intent, email, email_sender=None, dry_run=False):
+def route_to_handler(intent, email, email_sender=None, db=None, dry_run=False):
     """Route email to appropriate handler based on intent.
 
     Args:
         intent: Intent enum value
         email: Email object
         email_sender: EmailSender instance (optional)
+        db: Database instance (optional, needed for create_account)
         dry_run: If True, don't take real actions
 
     Returns:
@@ -418,10 +420,14 @@ def route_to_handler(intent, email, email_sender=None, dry_run=False):
             handler_result["error"] = "EmailSender not configured"
 
     elif intent == Intent.CREATE_ACCOUNT:
-        # TODO: Implement create_account handler (CRM task creation)
         logger.debug(f"Handler: create_account for {email.sender}")
-        handler_result["action"] = "create_account"
-        handler_result["status"] = "pending_implementation"
+        if email_sender and db:
+            handler_result = handle_create_account(email, email_sender, db, dry_run)
+            handler_result["intent"] = intent.label
+        else:
+            handler_result["action"] = "create_account"
+            handler_result["status"] = "error"
+            handler_result["error"] = "EmailSender or Database not configured"
 
     elif intent == Intent.SPEAK_TO_HUMAN:
         logger.debug(f"Handler: speak_to_human for {email.sender}")
