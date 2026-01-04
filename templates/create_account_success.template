@@ -6,6 +6,7 @@ We've created your account!
 
 Your username is: {USER_EMAIL}
 Your password is: {PASSWORD}
+Your authorization code is: {AUTH_CODE}
 
 Please keep this information safe. If you lose your password, you can recover it by clicking on 'Change or Reset Password? Change here' at the login screen.
 

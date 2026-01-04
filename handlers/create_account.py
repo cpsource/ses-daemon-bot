@@ -22,6 +22,16 @@ def generate_password() -> str:
     return f"{random_int:08x}"
 
 
+def generate_auth_code() -> str:
+    """Generate a random 32-bit hex authorization code.
+
+    Returns:
+        8-character hex string (e.g., 'e5f6g7h8')
+    """
+    random_int = random.getrandbits(32)
+    return f"{random_int:08x}"
+
+
 def hash_password(password: str) -> str:
     """Hash password using SHA-256.
 
@@ -177,9 +187,10 @@ def handle_create_account(email, sender: EmailSender, db, dry_run: bool = False)
                 "error": result["error"],
             }
 
-    # Generate password and create account
+    # Generate password and authorization code
     password = generate_password()
     password_hash = hash_password(password)
+    auth_code = generate_auth_code()
 
     if dry_run:
         logger.info(f"[DRY-RUN] Would create account for {user_email}")
@@ -191,8 +202,8 @@ def handle_create_account(email, sender: EmailSender, db, dry_run: bool = False)
             "username": user_email,
         }
 
-    # Create the user (store password in users_auth for recovery)
-    if not create_user(db, user_email, password_hash, password):
+    # Create the user (store auth_code in users_auth)
+    if not create_user(db, user_email, password_hash, auth_code):
         return {
             "action": "create_account",
             "status": "error",
@@ -204,7 +215,7 @@ def handle_create_account(email, sender: EmailSender, db, dry_run: bool = False)
     # Load success template and send credentials
     try:
         from_addr, body_template = load_template("create_account_success")
-        body = body_template.replace("{USER_EMAIL}", user_email).replace("{PASSWORD}", password)
+        body = body_template.replace("{USER_EMAIL}", user_email).replace("{PASSWORD}", password).replace("{AUTH_CODE}", auth_code)
     except Exception as e:
         logger.error(f"Failed to load template: {e}")
         return {
