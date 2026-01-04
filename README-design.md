@@ -160,7 +160,7 @@ Validates all required credentials are present before starting.
 ```
 usage: ses-daemon-bot [-h] [--version] [-v] [--config FILE] [--log-file FILE]
                       [--pid-file FILE] [--dry-run] [--daemon] [--once]
-                      [--interval SECS] [--test-creds]
+                      [--interval SECS] [--test-creds] [--test-ses]
 
 Options:
   --version        Show version
@@ -173,26 +173,107 @@ Options:
   --once           Process one batch and exit
   --interval SECS  Polling interval (default: 60)
   --test-creds     Validate credentials and exit
+  --test-ses       Read and display emails from S3 (non-destructive), then exit
 ```
 
 ## Database Schema
 
+### Table: `ses_emails`
+
 ```sql
-CREATE TABLE emails (
+CREATE TABLE IF NOT EXISTS ses_emails (
     id SERIAL PRIMARY KEY,
     message_id TEXT UNIQUE NOT NULL,
+    s3_key TEXT NOT NULL,
     sender TEXT NOT NULL,
+    sender_name TEXT,
+    recipient TEXT,
     subject TEXT,
     body TEXT,
-    received_at TIMESTAMP DEFAULT NOW(),
+    received_at TIMESTAMP WITH TIME ZONE,
+    processed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     intent_flags JSONB NOT NULL,
-    processed BOOLEAN DEFAULT FALSE
+    intent_label TEXT NOT NULL,
+    handler_result JSONB,
+    status TEXT DEFAULT 'processed'
 );
+
+-- Indexes for common queries
+CREATE INDEX IF NOT EXISTS idx_ses_emails_message_id ON ses_emails(message_id);
+CREATE INDEX IF NOT EXISTS idx_ses_emails_sender ON ses_emails(sender);
+CREATE INDEX IF NOT EXISTS idx_ses_emails_intent_label ON ses_emails(intent_label);
+CREATE INDEX IF NOT EXISTS idx_ses_emails_status ON ses_emails(status);
+CREATE INDEX IF NOT EXISTS idx_ses_emails_processed_at ON ses_emails(processed_at);
 ```
 
-The `intent_flags` column stores the classification result as JSONB:
+### Column Descriptions
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | SERIAL | Auto-incrementing primary key |
+| `message_id` | TEXT | Unique email Message-ID header (used for deduplication) |
+| `s3_key` | TEXT | S3 object key where email was stored |
+| `sender` | TEXT | Sender email address |
+| `sender_name` | TEXT | Sender display name (if provided) |
+| `recipient` | TEXT | Recipient address |
+| `subject` | TEXT | Email subject line |
+| `body` | TEXT | Plain text body content |
+| `received_at` | TIMESTAMPTZ | Original email received timestamp |
+| `processed_at` | TIMESTAMPTZ | When daemon processed this email |
+| `intent_flags` | JSONB | Classification result as boolean array |
+| `intent_label` | TEXT | Human-readable intent (send_info, create_account, etc.) |
+| `handler_result` | JSONB | Result data from intent handler |
+| `status` | TEXT | Processing status (processed, failed, pending_review) |
+
+### Status Values
+
+| Status | Description |
+|--------|-------------|
+| `processed` | Successfully classified and handled |
+| `failed` | Processing failed (error stored in handler_result) |
+| `pending_review` | Queued for human review (unknown intent) |
+| `escalated` | Escalated to human support |
+
+### The `intent_flags` Column
+
+Stores the classification result as a JSONB array of 5 booleans:
 ```json
-[false, true, false, false, false]
+[false, true, false, false, false]  // create_account intent
+```
+
+Index mapping:
+- `[0]` = send_info
+- `[1]` = create_account
+- `[2]` = unknown
+- `[3]` = speak_to_human
+- `[4]` = reserved (always false)
+
+### Database Operations (db.py)
+
+The `Database` class provides:
+
+| Method | Description |
+|--------|-------------|
+| `initialize()` | Create tables and indexes if not exist |
+| `save_email(...)` | Insert or update email record (upsert on message_id) |
+| `get_email_by_message_id(id)` | Retrieve by Message-ID header |
+| `get_email_by_id(id)` | Retrieve by database ID |
+| `email_exists(message_id)` | Check if already processed (for deduplication) |
+| `get_emails_by_intent(label, limit)` | Query by intent classification |
+| `get_emails_by_status(status, limit)` | Query by processing status |
+| `get_recent_emails(limit)` | Get most recently processed |
+| `update_email_status(id, status, result)` | Update status and handler result |
+| `get_counts_by_intent()` | Aggregate counts by intent |
+| `get_counts_by_status()` | Aggregate counts by status |
+| `test_connection()` | Verify database connectivity |
+
+### Connection Management
+
+Uses context managers for safe connection handling:
+```python
+with db.get_cursor() as cursor:
+    cursor.execute(query, params)
+    # Auto-commit on success, rollback on exception
 ```
 
 ## Project Structure
@@ -216,7 +297,10 @@ ses-daemon-bot/
 │   ├── conftest.py      # Shared fixtures
 │   ├── test_cli.py      # CLI tests
 │   ├── test_config.py   # Config loading tests
-│   └── test_credentials.py # Credential validation tests
+│   ├── test_credentials.py # Credential validation tests
+│   ├── test_ses_client.py  # SES/S3 client tests
+│   ├── test_classifier.py  # Intent classifier tests
+│   └── test_db.py       # Database operations tests
 ├── requirements.txt
 ├── ses-daemon-bot.service  # systemd unit file
 ├── ses-plan.txt         # Intent classification plan (working doc)
