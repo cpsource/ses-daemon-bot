@@ -8,7 +8,7 @@ User=ubuntu
 WorkingDirectory=/home/ubuntu/ses-daemon-bot
 Environment=PATH=/home/ubuntu/mnt/myproject/bin:/usr/bin
 EnvironmentFile=/home/ubuntu/.env
-ExecStart=/home/ubuntu/mnt/myproject/bin/python main.py
+ExecStart=/home/ubuntu/mnt/myproject/bin/python main.py --log-file /var/log/ses-daemon-bot.log
 Restart=always
 RestartSec=10
 
