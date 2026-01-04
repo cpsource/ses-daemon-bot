@@ -1,0 +1,48 @@
+[Unit]
+Description=SES Daemon Bot - AWS SES Email Processor for FrFlashy.com
+Documentation=https://github.com/cpsource/ses-daemon-bot
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=forking
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/ses-daemon-bot
+Environment="PATH=/home/ubuntu/mnt/myproject/bin:/usr/local/bin:/usr/bin:/bin"
+
+# Main daemon command
+ExecStart=/home/ubuntu/mnt/myproject/bin/python3 /home/ubuntu/ses-daemon-bot/main.py \
+    --daemon \
+    --config /home/ubuntu/.env \
+    --log-file /var/log/ses-daemon-bot.log \
+    --pid-file /var/run/ses-daemon-bot.pid \
+    --interval 60
+
+ExecStop=/bin/kill -TERM $MAINPID
+ExecReload=/bin/kill -HUP $MAINPID
+
+PIDFile=/var/run/ses-daemon-bot.pid
+
+# Restart policy
+Restart=on-failure
+RestartSec=10
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/log /var/run /home/ubuntu/ses-daemon-bot
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ses-daemon-bot
+
+[Install]
+WantedBy=multi-user.target
