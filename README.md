@@ -16,19 +16,22 @@ This daemon monitors an AWS SES mailbox, classifies incoming emails by intent us
 
 ## Intent Classification
 
-Emails are classified into one of five intent categories:
+Emails are classified into one of eight intent categories:
 
-| Index | Intent           | Description                                      |
-|-------|------------------|--------------------------------------------------|
-| 0     | `send_info`      | User wants information, pricing, docs            |
-| 1     | `create_account` | User wants to sign up, register, start trial     |
-| 2     | `unknown`        | Intent cannot be confidently determined          |
-| 3     | `speak_to_human` | User asks for a person, call, or support         |
-| 4     | `reserved`       | Reserved for future use                          |
+| Index | Intent              | Description                                      |
+|-------|---------------------|--------------------------------------------------|
+| 0     | `send_info`         | User wants information, pricing, docs            |
+| 1     | `create_account`    | User wants to sign up, register, start trial     |
+| 2     | `unknown`           | Intent cannot be confidently determined          |
+| 3     | `speak_to_human`    | User asks for phone/voice support                |
+| 4     | `email_to_human`    | User wants to email a human for help             |
+| 5     | `spam_or_auto_reply`| Spam, junk mail, out-of-office, auto-responders  |
+| 6     | `unsubscribe`       | User wants to opt-out, unsubscribe, delete account|
+| 7     | `reserved`          | Reserved for future use                          |
 
-Classification returns a JSON array of 5 booleans with exactly one `true` value:
+Classification returns a JSON array of 8 booleans with exactly one `true` value:
 ```json
-[false, true, false, false, false]  // create_account intent
+[false, true, false, false, false, false, false, false]  // create_account intent
 ```
 
 ## Architecture
@@ -112,7 +115,16 @@ ses-daemon-bot/
 │   ├── send_info.py
 │   ├── create_account.py
 │   ├── speak_to_human.py
+│   ├── email_to_human.py
+│   ├── unsubscribe.py
 │   └── unknown.py
+├── templates/           # Email response templates
+│   ├── send_info.template
+│   ├── create_account_success.template
+│   ├── create_account_exists.template
+│   ├── speak_to_human.template
+│   ├── email_to_human.template
+│   └── unsubscribe.template
 ├── db.py                # Database operations
 ├── requirements.txt
 ├── ses-daemon-bot.service

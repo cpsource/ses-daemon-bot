@@ -102,20 +102,23 @@ A Python 3 daemon that processes incoming emails for FrFlashy.com via AWS SES, c
 
 ### Intent Categories
 
-| Index | Intent           | Description                                  | Handler Action        |
-|-------|------------------|----------------------------------------------|----------------------|
-| 0     | `send_info`      | User wants information, pricing, docs        | Auto-reply with info |
-| 1     | `create_account` | User wants to sign up, register, trial       | CRM task creation    |
-| 2     | `unknown`        | Intent cannot be determined                  | Queue for review     |
-| 3     | `speak_to_human` | User requests human contact                  | Escalate to support  |
-| 4     | `reserved`       | Reserved for future use                      | N/A (always false)   |
+| Index | Intent              | Description                                  | Handler Action              |
+|-------|---------------------|----------------------------------------------|-----------------------------|
+| 0     | `send_info`         | User wants information, pricing, docs        | Auto-reply with info        |
+| 1     | `create_account`    | User wants to sign up, register, trial       | Create account, send creds  |
+| 2     | `unknown`           | Intent cannot be determined                  | Forward to admin            |
+| 3     | `speak_to_human`    | User requests phone/voice support            | Reply: email support only   |
+| 4     | `email_to_human`    | User wants to email a human for help         | Reply + forward to admin    |
+| 5     | `spam_or_auto_reply`| Spam, junk mail, out-of-office, auto-reply   | Silently ignore             |
+| 6     | `unsubscribe`       | User wants to opt-out, unsubscribe, delete   | Acknowledge + process       |
+| 7     | `reserved`          | Reserved for future use                      | N/A (always false)          |
 
 ### Classification Output Format
 
-Returns a JSON array of 5 booleans with exactly one `true`:
+Returns a JSON array of 8 booleans with exactly one `true`:
 
 ```json
-[false, true, false, false, false]  // create_account intent
+[false, true, false, false, false, false, false, false]  // create_account intent
 ```
 
 ### LLM Prompt
@@ -126,7 +129,7 @@ The prompt instructs the LLM to:
 - Analyze email content
 - Return exactly one true value
 - Default to `unknown` (index 2) if ambiguous
-- Always set index 4 to false
+- Always set index 7 to false
 
 ## Configuration
 
@@ -236,9 +239,9 @@ CREATE INDEX IF NOT EXISTS idx_ses_emails_processed_at ON ses_emails(processed_a
 
 ### The `intent_flags` Column
 
-Stores the classification result as a JSONB array of 5 booleans:
+Stores the classification result as a JSONB array of 8 booleans:
 ```json
-[false, true, false, false, false]  // create_account intent
+[false, true, false, false, false, false, false, false]  // create_account intent
 ```
 
 Index mapping:
@@ -246,7 +249,10 @@ Index mapping:
 - `[1]` = create_account
 - `[2]` = unknown
 - `[3]` = speak_to_human
-- `[4]` = reserved (always false)
+- `[4]` = email_to_human
+- `[5]` = spam_or_auto_reply
+- `[6]` = unsubscribe
+- `[7]` = reserved (always false)
 
 ### Database Operations (db.py)
 
@@ -288,9 +294,18 @@ ses-daemon-bot/
 ├── handlers/            # Intent-specific handlers
 │   ├── __init__.py
 │   ├── send_info.py     # Auto-reply with information
-│   ├── create_account.py # CRM task creation
-│   ├── speak_to_human.py # Escalation handler
-│   └── unknown.py       # Queue for manual review
+│   ├── create_account.py # Create account, send credentials
+│   ├── speak_to_human.py # Reply: email support only
+│   ├── email_to_human.py # Reply + forward to admin
+│   ├── unsubscribe.py   # Acknowledge unsubscribe request
+│   └── unknown.py       # Forward to admin for review
+├── templates/           # Email response templates
+│   ├── send_info.template
+│   ├── create_account_success.template
+│   ├── create_account_exists.template
+│   ├── speak_to_human.template
+│   ├── email_to_human.template
+│   └── unsubscribe.template
 ├── prompts/
 │   └── intent_classifier.txt  # LLM prompt template
 ├── qa/                  # Test suite

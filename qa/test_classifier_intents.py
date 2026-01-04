@@ -130,3 +130,22 @@ This is an automated response.""",
             f"Expected spam_or_auto_reply, got {result.intent_label}"
         )
         assert result.intent_flags[5] is True  # spam_or_auto_reply is index 5
+
+    def test_unsubscribe_intent(self, classifier):
+        """Email asking to unsubscribe should return unsubscribe intent."""
+        result = classifier.classify_with_context(
+            subject="Unsubscribe request",
+            body="""Hello,
+
+Please remove me from your mailing list. I no longer wish to receive
+emails from your company.
+
+Thank you,
+Sarah""",
+            sender="sarah@example.com",
+        )
+
+        assert result.intent == Intent.UNSUBSCRIBE, (
+            f"Expected unsubscribe, got {result.intent_label}"
+        )
+        assert result.intent_flags[6] is True  # unsubscribe is index 6

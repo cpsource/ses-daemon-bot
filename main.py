@@ -16,7 +16,7 @@ from classifier import Classifier
 from db import Database
 from blacklist import handle_bounce
 from workmail import WorkMailClient
-from handlers import EmailSender, handle_send_info, handle_unknown, handle_speak_to_human, handle_email_to_human, handle_create_account
+from handlers import EmailSender, handle_send_info, handle_unknown, handle_speak_to_human, handle_email_to_human, handle_create_account, handle_unsubscribe
 
 __version__ = "0.1.0"
 
@@ -311,7 +311,7 @@ def process_single_email(email, ses_client, classifier, db, email_sender=None, w
                     subject=email.subject,
                     body=email.body,
                     received_at=email.received_at,
-                    intent_flags=[False, False, False, False, False, False, False],  # No intent classification
+                    intent_flags=[False, False, False, False, False, False, False, False],  # No intent classification
                     intent_label="bounce_notification",
                     handler_result=bounce_result,
                     status="processed",
@@ -464,6 +464,16 @@ def route_to_handler(intent, email, email_sender=None, db=None, dry_run=False):
         logger.info(f"Ignoring spam/auto-reply from {email.sender}")
         handler_result["action"] = "ignore"
         handler_result["status"] = "ignored"
+
+    elif intent == Intent.UNSUBSCRIBE:
+        logger.debug(f"Handler: unsubscribe for {email.sender}")
+        if email_sender:
+            handler_result = handle_unsubscribe(email, email_sender, db, dry_run)
+            handler_result["intent"] = intent.label
+        else:
+            handler_result["action"] = "unsubscribe"
+            handler_result["status"] = "error"
+            handler_result["error"] = "EmailSender not configured"
 
     else:
         # Reserved or unexpected
