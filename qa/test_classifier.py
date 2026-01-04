@@ -17,7 +17,10 @@ def test_intent_enum():
     assert Intent.CREATE_ACCOUNT == 1
     assert Intent.UNKNOWN == 2
     assert Intent.SPEAK_TO_HUMAN == 3
-    assert Intent.RESERVED == 4
+    assert Intent.EMAIL_TO_HUMAN == 4
+    assert Intent.SPAM_OR_AUTO_REPLY == 5
+    assert Intent.UNSUBSCRIBE == 6
+    assert Intent.RESERVED == 7
 
     assert Intent.SEND_INFO.label == "send_info"
     assert Intent.UNKNOWN.label == "unknown"
@@ -36,13 +39,13 @@ def test_classification_result():
     """Test ClassificationResult dataclass."""
     result = ClassificationResult(
         intent=Intent.SEND_INFO,
-        intent_flags=[True, False, False, False, False],
-        raw_response="[true, false, false, false, false]",
+        intent_flags=[True, False, False, False, False, False, False, False],
+        raw_response="[true, false, false, false, false, false, false, false]",
     )
 
     assert result.intent == Intent.SEND_INFO
     assert result.intent_label == "send_info"
-    assert result.to_json() == "[true, false, false, false, false]"
+    assert result.to_json() == "[true, false, false, false, false, false, false, false]"
 
 
 @patch("classifier.OpenAI")
@@ -66,17 +69,21 @@ def test_classifier_parse_valid_response(mock_openai):
     classifier = Classifier(config)
 
     # Test send_info
-    result = classifier._parse_response("[true, false, false, false, false]")
+    result = classifier._parse_response("[true, false, false, false, false, false, false, false]")
     assert result.intent == Intent.SEND_INFO
-    assert result.intent_flags == [True, False, False, False, False]
+    assert result.intent_flags == [True, False, False, False, False, False, False, False]
 
     # Test create_account
-    result = classifier._parse_response("[false, true, false, false, false]")
+    result = classifier._parse_response("[false, true, false, false, false, false, false, false]")
     assert result.intent == Intent.CREATE_ACCOUNT
 
     # Test speak_to_human
-    result = classifier._parse_response("[false, false, false, true, false]")
+    result = classifier._parse_response("[false, false, false, true, false, false, false, false]")
     assert result.intent == Intent.SPEAK_TO_HUMAN
+
+    # Test unsubscribe
+    result = classifier._parse_response("[false, false, false, false, false, false, true, false]")
+    assert result.intent == Intent.UNSUBSCRIBE
 
 
 @patch("classifier.OpenAI")
@@ -87,7 +94,7 @@ def test_classifier_parse_invalid_json(mock_openai):
 
     result = classifier._parse_response("not valid json")
     assert result.intent == Intent.UNKNOWN
-    assert result.intent_flags == [False, False, True, False, False]
+    assert result.intent_flags == [False, False, True, False, False, False, False, False]
 
 
 @patch("classifier.OpenAI")
@@ -106,7 +113,7 @@ def test_classifier_parse_multiple_true(mock_openai):
     config = LLMConfig(api_key="test-key", model="gpt-4")
     classifier = Classifier(config)
 
-    result = classifier._parse_response("[true, true, false, false, false]")
+    result = classifier._parse_response("[true, true, false, false, false, false, false, false]")
     assert result.intent == Intent.UNKNOWN
 
 
@@ -119,7 +126,7 @@ def test_classify_call(mock_openai):
 
     mock_response = MagicMock()
     mock_response.choices = [MagicMock()]
-    mock_response.choices[0].message.content = "[false, true, false, false, false]"
+    mock_response.choices[0].message.content = "[false, true, false, false, false, false, false, false]"
     mock_client.chat.completions.create.return_value = mock_response
 
     config = LLMConfig(api_key="test-key", model="gpt-4")
@@ -139,7 +146,7 @@ def test_classify_with_context(mock_openai):
 
     mock_response = MagicMock()
     mock_response.choices = [MagicMock()]
-    mock_response.choices[0].message.content = "[true, false, false, false, false]"
+    mock_response.choices[0].message.content = "[true, false, false, false, false, false, false, false]"
     mock_client.chat.completions.create.return_value = mock_response
 
     config = LLMConfig(api_key="test-key", model="gpt-4")
