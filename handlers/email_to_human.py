@@ -9,6 +9,10 @@ logger = logging.getLogger("ses-daemon-bot")
 
 TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 
+# Admin email for forwarding human requests
+ADMIN_EMAIL = "page.cal@gmail.com"
+ADMIN_SUBJECT = "Frflashy user requests help"
+
 
 def handle_email_to_human(email, sender: EmailSender, dry_run: bool = False) -> dict:
     """Handle email_to_human intent by acknowledging and queuing for human review.
@@ -70,14 +74,16 @@ def handle_email_to_human(email, sender: EmailSender, dry_run: bool = False) -> 
 
     if dry_run:
         logger.info(f"[DRY-RUN] Would reply (email_to_human) to {email.sender} re: {reply_subject}")
+        logger.info(f"[DRY-RUN] Would forward to {ADMIN_EMAIL}: {ADMIN_SUBJECT}")
         return {
             "action": "email_to_human",
             "status": "dry_run",
             "to": email.sender,
             "subject": f"Re: {reply_subject}",
+            "forwarded_to": ADMIN_EMAIL,
         }
 
-    # Send reply
+    # Send reply to user
     result = sender.send_reply(
         to_addr=email.sender,
         from_addr=from_addr,
@@ -86,17 +92,50 @@ def handle_email_to_human(email, sender: EmailSender, dry_run: bool = False) -> 
         in_reply_to=email.message_id,
     )
 
-    if result["success"]:
+    if not result["success"]:
+        return {
+            "action": "email_to_human",
+            "status": "error",
+            "error": result["error"],
+        }
+
+    reply_message_id = result["message_id"]
+
+    # Forward original email to admin
+    forward_body = f"""Original email from: {email.sender}
+Original subject: {email.subject}
+Received: {email.received_at}
+
+--- Original Message ---
+
+{email.body}
+"""
+
+    forward_result = sender.send_email(
+        to_addr=ADMIN_EMAIL,
+        from_addr=from_addr,
+        subject=ADMIN_SUBJECT,
+        body=forward_body,
+    )
+
+    if forward_result["success"]:
+        logger.info(f"Forwarded email to {ADMIN_EMAIL}")
         return {
             "action": "email_to_human",
             "status": "sent",
             "to": email.sender,
             "subject": f"Re: {reply_subject}",
-            "message_id": result["message_id"],
+            "message_id": reply_message_id,
+            "forwarded_to": ADMIN_EMAIL,
+            "forward_message_id": forward_result["message_id"],
         }
     else:
+        logger.warning(f"Failed to forward to admin: {forward_result['error']}")
         return {
             "action": "email_to_human",
-            "status": "error",
-            "error": result["error"],
+            "status": "sent",
+            "to": email.sender,
+            "subject": f"Re: {reply_subject}",
+            "message_id": reply_message_id,
+            "forward_error": forward_result["error"],
         }
