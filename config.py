@@ -58,6 +58,15 @@ class DaemonConfig:
 
 
 @dataclass
+class WorkMailConfig:
+    """AWS WorkMail IMAP settings."""
+
+    email: str = ""
+    password: str = ""
+    server: str = "imap.mail.us-east-1.awsapps.com"
+
+
+@dataclass
 class Config:
     """Main configuration container."""
 
@@ -65,6 +74,7 @@ class Config:
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     daemon: DaemonConfig = field(default_factory=DaemonConfig)
+    workmail: WorkMailConfig = field(default_factory=WorkMailConfig)
 
 
 def load_config(env_file: Optional[Path] = None) -> Config:
@@ -105,6 +115,11 @@ def load_config(env_file: Optional[Path] = None) -> Config:
             poll_interval=int(os.getenv("POLL_INTERVAL", "60")),
             log_file=os.getenv("LOG_FILE"),
             pid_file=os.getenv("PID_FILE"),
+        ),
+        workmail=WorkMailConfig(
+            email=os.getenv("WORKMAIL_EMAIL", "admin@frflashy.com"),
+            password=os.getenv("WORKMAIL_PASSWORD", ""),
+            server=os.getenv("WORKMAIL_SERVER", "imap.mail.us-east-1.awsapps.com"),
         ),
     )
 

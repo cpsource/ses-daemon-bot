@@ -15,6 +15,7 @@ from ses_client import SESClient
 from classifier import Classifier
 from db import Database
 from blacklist import handle_bounce
+from workmail import WorkMailClient
 
 __version__ = "0.1.0"
 
@@ -272,7 +273,7 @@ def test_ses_connection(config):
         raise
 
 
-def process_single_email(email, ses_client, classifier, db, dry_run=False):
+def process_single_email(email, ses_client, classifier, db, workmail_client=None, dry_run=False):
     """Process a single email through classification and handling.
 
     Args:
@@ -280,6 +281,7 @@ def process_single_email(email, ses_client, classifier, db, dry_run=False):
         ses_client: SESClient instance
         classifier: Classifier instance
         db: Database instance
+        workmail_client: WorkMailClient instance (optional)
         dry_run: If True, don't modify S3 or send responses
 
     Returns:
@@ -313,6 +315,13 @@ def process_single_email(email, ses_client, classifier, db, dry_run=False):
                     status="processed",
                 )
                 ses_client.mark_processed(email.s3_key)
+
+                # Mark as read in WorkMail
+                if workmail_client and email.message_id:
+                    if workmail_client.mark_as_read_by_message_id(email.message_id):
+                        logger.debug(f"Marked bounce as read in WorkMail: {email.message_id}")
+                    else:
+                        logger.warning(f"Failed to mark bounce as read in WorkMail: {email.message_id}")
 
             return True
 
@@ -427,13 +436,14 @@ def route_to_handler(intent, email, dry_run=False):
     return handler_result
 
 
-def process_emails(ses_client, classifier, db, dry_run=False):
+def process_emails(ses_client, classifier, db, workmail_client=None, dry_run=False):
     """Process a single batch of emails.
 
     Args:
         ses_client: SESClient instance
         classifier: Classifier instance
         db: Database instance
+        workmail_client: WorkMailClient instance (optional)
         dry_run: If True, don't modify anything
 
     Returns:
@@ -461,7 +471,7 @@ def process_emails(ses_client, classifier, db, dry_run=False):
             continue
 
         # Process the email
-        if process_single_email(email, ses_client, classifier, db, dry_run):
+        if process_single_email(email, ses_client, classifier, db, workmail_client, dry_run):
             processed_count += 1
 
     return processed_count
@@ -481,6 +491,23 @@ def run(args, config):
 
     logger.info("Initializing database...")
     db = Database(config.database)
+
+    # Initialize WorkMail client (optional - for marking emails as read)
+    workmail_client = None
+    if config.workmail.email and config.workmail.password:
+        logger.info("Initializing WorkMail client...")
+        workmail_client = WorkMailClient(
+            email=config.workmail.email,
+            password=config.workmail.password,
+            server=config.workmail.server,
+        )
+        if workmail_client.connect():
+            logger.info(f"Connected to WorkMail as {config.workmail.email}")
+        else:
+            logger.warning("Failed to connect to WorkMail - emails will not be marked as read")
+            workmail_client = None
+    else:
+        logger.debug("WorkMail credentials not configured - skipping WorkMail integration")
 
     # Initialize database schema
     if not db.initialize():
@@ -507,23 +534,29 @@ def run(args, config):
 
     logger.info(f"Starting processing loop (interval: {args.interval}s)")
 
-    while running:
-        try:
-            count = process_emails(ses_client, classifier, db, dry_run=args.dry_run)
-            if count > 0:
-                logger.info(f"Processed {count} email(s)")
-        except Exception as e:
-            logger.exception(f"Error processing emails: {e}")
+    try:
+        while running:
+            try:
+                count = process_emails(ses_client, classifier, db, workmail_client, dry_run=args.dry_run)
+                if count > 0:
+                    logger.info(f"Processed {count} email(s)")
+            except Exception as e:
+                logger.exception(f"Error processing emails: {e}")
 
-        if args.once:
-            logger.info("Single run complete, exiting")
-            break
-
-        # Sleep in small increments to allow signal handling
-        for _ in range(args.interval):
-            if not running:
+            if args.once:
+                logger.info("Single run complete, exiting")
                 break
-            time.sleep(1)
+
+            # Sleep in small increments to allow signal handling
+            for _ in range(args.interval):
+                if not running:
+                    break
+                time.sleep(1)
+    finally:
+        # Cleanup
+        if workmail_client:
+            workmail_client.disconnect()
+            logger.debug("Disconnected from WorkMail")
 
 
 def main():
