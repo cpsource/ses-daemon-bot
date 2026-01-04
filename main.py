@@ -16,7 +16,7 @@ from classifier import Classifier
 from db import Database
 from blacklist import handle_bounce
 from workmail import WorkMailClient
-from handlers import EmailSender, handle_send_info, handle_unknown
+from handlers import EmailSender, handle_send_info, handle_unknown, handle_speak_to_human, handle_email_to_human
 
 __version__ = "0.1.0"
 
@@ -311,7 +311,7 @@ def process_single_email(email, ses_client, classifier, db, email_sender=None, w
                     subject=email.subject,
                     body=email.body,
                     received_at=email.received_at,
-                    intent_flags=[False, False, False, False, False],  # No intent classification
+                    intent_flags=[False, False, False, False, False, False],  # No intent classification
                     intent_label="bounce_notification",
                     handler_result=bounce_result,
                     status="processed",
@@ -424,10 +424,24 @@ def route_to_handler(intent, email, email_sender=None, dry_run=False):
         handler_result["status"] = "pending_implementation"
 
     elif intent == Intent.SPEAK_TO_HUMAN:
-        # TODO: Implement speak_to_human handler (escalation)
         logger.debug(f"Handler: speak_to_human for {email.sender}")
-        handler_result["action"] = "escalate"
-        handler_result["status"] = "pending_implementation"
+        if email_sender:
+            handler_result = handle_speak_to_human(email, email_sender, dry_run)
+            handler_result["intent"] = intent.label
+        else:
+            handler_result["action"] = "speak_to_human"
+            handler_result["status"] = "error"
+            handler_result["error"] = "EmailSender not configured"
+
+    elif intent == Intent.EMAIL_TO_HUMAN:
+        logger.debug(f"Handler: email_to_human for {email.sender}")
+        if email_sender:
+            handler_result = handle_email_to_human(email, email_sender, dry_run)
+            handler_result["intent"] = intent.label
+        else:
+            handler_result["action"] = "email_to_human"
+            handler_result["status"] = "error"
+            handler_result["error"] = "EmailSender not configured"
 
     elif intent == Intent.UNKNOWN:
         logger.debug(f"Handler: unknown for {email.sender}")

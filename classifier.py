@@ -24,7 +24,8 @@ class Intent(IntEnum):
     CREATE_ACCOUNT = 1
     UNKNOWN = 2
     SPEAK_TO_HUMAN = 3
-    RESERVED = 4
+    EMAIL_TO_HUMAN = 4
+    RESERVED = 5
 
     @classmethod
     def from_index(cls, index: int) -> "Intent":
@@ -39,6 +40,7 @@ class Intent(IntEnum):
             Intent.CREATE_ACCOUNT: "create_account",
             Intent.UNKNOWN: "unknown",
             Intent.SPEAK_TO_HUMAN: "speak_to_human",
+            Intent.EMAIL_TO_HUMAN: "email_to_human",
             Intent.RESERVED: "reserved",
         }
         return labels[self]
@@ -50,7 +52,8 @@ class Intent(IntEnum):
             Intent.SEND_INFO: "User wants information, pricing, or documentation",
             Intent.CREATE_ACCOUNT: "User wants to sign up, register, or start trial",
             Intent.UNKNOWN: "Intent cannot be confidently determined",
-            Intent.SPEAK_TO_HUMAN: "User requests human contact or support",
+            Intent.SPEAK_TO_HUMAN: "User requests phone or voice support",
+            Intent.EMAIL_TO_HUMAN: "User requests human contact via email",
             Intent.RESERVED: "Reserved for future use",
         }
         return descriptions[self]
@@ -170,7 +173,7 @@ Return the JSON array now."""
             # Return unknown intent on error
             return ClassificationResult(
                 intent=Intent.UNKNOWN,
-                intent_flags=[False, False, True, False, False],
+                intent_flags=[False, False, True, False, False, False],
                 raw_response=str(e),
             )
 
@@ -188,8 +191,8 @@ Return the JSON array now."""
             intent_flags = json.loads(raw_response)
 
             # Validate format
-            if not isinstance(intent_flags, list) or len(intent_flags) != 5:
-                raise ValueError(f"Invalid response format: expected list of 5, got {intent_flags}")
+            if not isinstance(intent_flags, list) or len(intent_flags) != 6:
+                raise ValueError(f"Invalid response format: expected list of 6, got {intent_flags}")
 
             # Convert to bools
             intent_flags = [bool(x) for x in intent_flags]
@@ -199,7 +202,7 @@ Return the JSON array now."""
             if true_count != 1:
                 logger.warning(f"Expected exactly 1 true value, got {true_count}")
                 # Default to unknown if invalid
-                intent_flags = [False, False, True, False, False]
+                intent_flags = [False, False, True, False, False, False]
 
             # Get the intent
             intent_index = intent_flags.index(True)
@@ -215,14 +218,14 @@ Return the JSON array now."""
             logger.warning(f"Failed to parse LLM response as JSON: {e}")
             return ClassificationResult(
                 intent=Intent.UNKNOWN,
-                intent_flags=[False, False, True, False, False],
+                intent_flags=[False, False, True, False, False, False],
                 raw_response=raw_response,
             )
         except Exception as e:
             logger.warning(f"Error parsing classification response: {e}")
             return ClassificationResult(
                 intent=Intent.UNKNOWN,
-                intent_flags=[False, False, True, False, False],
+                intent_flags=[False, False, True, False, False, False],
                 raw_response=raw_response,
             )
 

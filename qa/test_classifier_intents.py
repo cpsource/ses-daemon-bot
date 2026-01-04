@@ -92,3 +92,22 @@ Alice""",
             f"Expected create_account, got {result.intent_label}"
         )
         assert result.intent_flags[1] is True  # create_account is index 1
+
+    def test_email_to_human_intent(self, classifier):
+        """Email explicitly asking to email a human should return email_to_human intent."""
+        result = classifier.classify_with_context(
+            subject="Email to a human",
+            body="""Hi,
+
+I need to discuss a billing issue with someone on your team.
+Please have someone email me back.
+
+Thanks,
+Mike""",
+            sender="mike@example.com",
+        )
+
+        assert result.intent == Intent.EMAIL_TO_HUMAN, (
+            f"Expected email_to_human, got {result.intent_label}"
+        )
+        assert result.intent_flags[4] is True  # email_to_human is index 4
