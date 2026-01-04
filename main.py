@@ -11,6 +11,9 @@ import time
 from pathlib import Path
 
 from config import load_config
+from ses_client import SESClient
+from classifier import Classifier
+from db import Database
 
 __version__ = "0.1.0"
 
@@ -268,17 +271,204 @@ def test_ses_connection(config):
         raise
 
 
-def process_emails(dry_run=False):
-    """Process a single batch of emails."""
+def process_single_email(email, ses_client, classifier, db, dry_run=False):
+    """Process a single email through classification and handling.
+
+    Args:
+        email: Email object from SESClient
+        ses_client: SESClient instance
+        classifier: Classifier instance
+        db: Database instance
+        dry_run: If True, don't modify S3 or send responses
+
+    Returns:
+        True if processed successfully, False otherwise
+    """
+    try:
+        # Check if already processed (deduplication)
+        if db.email_exists(email.message_id):
+            logger.debug(f"Email {email.message_id} already processed, skipping")
+            if not dry_run:
+                ses_client.mark_processed(email.s3_key)
+            return True
+
+        # Classify intent
+        logger.debug(f"Classifying email: {email.subject}")
+        result = classifier.classify_with_context(
+            subject=email.subject or "",
+            body=email.body or "",
+            sender=email.sender,
+        )
+
+        logger.info(
+            f"Email from {email.sender}: intent={result.intent_label} "
+            f"subject=\"{email.subject[:50]}...\"" if email.subject and len(email.subject) > 50
+            else f"Email from {email.sender}: intent={result.intent_label} subject=\"{email.subject}\""
+        )
+
+        # Route to handler based on intent
+        handler_result = route_to_handler(
+            intent=result.intent,
+            email=email,
+            dry_run=dry_run,
+        )
+
+        # Determine status based on handler result
+        status = "processed"
+        if result.intent_label == "unknown":
+            status = "pending_review"
+        elif result.intent_label == "speak_to_human":
+            status = "escalated"
+
+        # Save to database
+        if not dry_run:
+            db.save_email(
+                message_id=email.message_id,
+                s3_key=email.s3_key,
+                sender=email.sender,
+                sender_name=email.sender_name,
+                recipient=email.recipient,
+                subject=email.subject,
+                body=email.body,
+                received_at=email.received_at,
+                intent_flags=result.intent_flags,
+                intent_label=result.intent_label,
+                handler_result=handler_result,
+                status=status,
+            )
+
+            # Mark as processed in S3
+            ses_client.mark_processed(email.s3_key)
+
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to process email {email.message_id}: {e}")
+        if not dry_run:
+            try:
+                ses_client.mark_failed(email.s3_key)
+            except Exception as move_err:
+                logger.error(f"Failed to move email to failed/: {move_err}")
+        return False
+
+
+def route_to_handler(intent, email, dry_run=False):
+    """Route email to appropriate handler based on intent.
+
+    Args:
+        intent: Intent enum value
+        email: Email object
+        dry_run: If True, don't take real actions
+
+    Returns:
+        Dict with handler result data
+    """
+    from classifier import Intent
+
+    handler_result = {
+        "intent": intent.label,
+        "dry_run": dry_run,
+    }
+
+    if intent == Intent.SEND_INFO:
+        # TODO: Implement send_info handler (auto-reply with info)
+        logger.debug(f"Handler: send_info for {email.sender}")
+        handler_result["action"] = "send_info"
+        handler_result["status"] = "pending_implementation"
+
+    elif intent == Intent.CREATE_ACCOUNT:
+        # TODO: Implement create_account handler (CRM task creation)
+        logger.debug(f"Handler: create_account for {email.sender}")
+        handler_result["action"] = "create_account"
+        handler_result["status"] = "pending_implementation"
+
+    elif intent == Intent.SPEAK_TO_HUMAN:
+        # TODO: Implement speak_to_human handler (escalation)
+        logger.debug(f"Handler: speak_to_human for {email.sender}")
+        handler_result["action"] = "escalate"
+        handler_result["status"] = "pending_implementation"
+
+    elif intent == Intent.UNKNOWN:
+        # Queue for manual review
+        logger.debug(f"Handler: unknown - queued for review: {email.sender}")
+        handler_result["action"] = "queue_for_review"
+        handler_result["status"] = "queued"
+
+    else:
+        # Reserved or unexpected
+        logger.warning(f"No handler for intent: {intent}")
+        handler_result["action"] = "none"
+        handler_result["status"] = "no_handler"
+
+    return handler_result
+
+
+def process_emails(ses_client, classifier, db, dry_run=False):
+    """Process a single batch of emails.
+
+    Args:
+        ses_client: SESClient instance
+        classifier: Classifier instance
+        db: Database instance
+        dry_run: If True, don't modify anything
+
+    Returns:
+        Number of emails processed
+    """
     logger.debug("Checking for new emails...")
-    # TODO: Implement email processing
-    return 0  # Return count of processed emails
+
+    # List pending emails
+    pending_keys = list(ses_client.list_pending_emails())
+
+    if not pending_keys:
+        logger.debug("No pending emails")
+        return 0
+
+    logger.info(f"Found {len(pending_keys)} pending email(s)")
+
+    processed_count = 0
+    for s3_key in pending_keys:
+        # Fetch and parse email
+        email = ses_client.fetch_email(s3_key)
+        if not email:
+            logger.warning(f"Failed to fetch email: {s3_key}")
+            if not dry_run:
+                ses_client.mark_failed(s3_key)
+            continue
+
+        # Process the email
+        if process_single_email(email, ses_client, classifier, db, dry_run):
+            processed_count += 1
+
+    return processed_count
 
 
 def run(args, config):
     """Main processing loop."""
     if args.dry_run:
         logger.info("Running in dry-run mode - no emails will be processed")
+
+    # Initialize clients
+    logger.info("Initializing SES client...")
+    ses_client = SESClient(config.aws)
+
+    logger.info("Initializing classifier...")
+    classifier = Classifier(config.llm)
+
+    logger.info("Initializing database...")
+    db = Database(config.database)
+
+    # Initialize database schema
+    if not db.initialize():
+        logger.error("Failed to initialize database schema")
+        return
+
+    # Test connections
+    if not db.test_connection():
+        logger.error("Database connection failed")
+        return
+
+    logger.info("All services initialized successfully")
 
     # Handle graceful shutdown
     running = True
@@ -295,7 +485,7 @@ def run(args, config):
 
     while running:
         try:
-            count = process_emails(dry_run=args.dry_run)
+            count = process_emails(ses_client, classifier, db, dry_run=args.dry_run)
             if count > 0:
                 logger.info(f"Processed {count} email(s)")
         except Exception as e:
