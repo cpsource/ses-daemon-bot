@@ -1,9 +1,10 @@
 """Handler for create_account intent."""
 
-import hashlib
 import logging
 import random
 from pathlib import Path
+
+from werkzeug.security import generate_password_hash
 
 from .base import EmailSender
 
@@ -22,26 +23,16 @@ def generate_password() -> str:
     return f"{random_int:08x}"
 
 
-def generate_auth_code() -> str:
-    """Generate a random 32-bit hex authorization code.
-
-    Returns:
-        8-character hex string (e.g., 'e5f6g7h8')
-    """
-    random_int = random.getrandbits(32)
-    return f"{random_int:08x}"
-
-
 def hash_password(password: str) -> str:
-    """Hash password using SHA-256.
+    """Hash password using werkzeug (compatible with FrFlashCards).
 
     Args:
         password: Plain text password
 
     Returns:
-        Hex-encoded SHA-256 hash
+        Werkzeug password hash
     """
-    return hashlib.sha256(password.encode()).hexdigest()
+    return generate_password_hash(password)
 
 
 def load_template(template_name: str) -> tuple[str, str]:
@@ -187,10 +178,10 @@ def handle_create_account(email, sender: EmailSender, db, dry_run: bool = False)
                 "error": result["error"],
             }
 
-    # Generate password and authorization code
+    # Generate password (also used as authorization code)
     password = generate_password()
     password_hash = hash_password(password)
-    auth_code = generate_auth_code()
+    auth_code = password  # Store plain password in users_auth for recovery
 
     if dry_run:
         logger.info(f"[DRY-RUN] Would create account for {user_email}")
