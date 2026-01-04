@@ -14,7 +14,7 @@ from config import load_config
 from ses_client import SESClient
 from classifier import Classifier
 from db import Database
-from blacklist import handle_bounce
+from blacklist import handle_bounce, handle_complaint
 from workmail import WorkMailClient
 from handlers import EmailSender, handle_send_info, handle_unknown, handle_speak_to_human, handle_email_to_human, handle_create_account, handle_unsubscribe
 
@@ -324,6 +324,36 @@ def process_single_email(email, ses_client, classifier, db, email_sender=None, w
                         logger.debug(f"Marked bounce as read in WorkMail: {email.message_id}")
                     else:
                         logger.warning(f"Failed to mark bounce as read in WorkMail: {email.message_id}")
+
+            return True
+
+        # Step 2.6: Check for complaint notifications and blacklist complainant addresses
+        complaint_result = handle_complaint(email, db, dry_run, email_sender)
+        if complaint_result:
+            # This is a complaint notification - store it with special handling
+            if not dry_run:
+                db.save_email(
+                    message_id=email.message_id,
+                    s3_key=email.s3_key,
+                    sender=email.sender,
+                    sender_name=email.sender_name,
+                    recipient=email.recipient,
+                    subject=email.subject,
+                    body=email.body,
+                    received_at=email.received_at,
+                    intent_flags=[False, False, False, False, False, False, False, False],  # No intent classification
+                    intent_label="complaint_notification",
+                    handler_result=complaint_result,
+                    status="processed",
+                )
+                ses_client.mark_processed(email.s3_key)
+
+                # Mark as read in WorkMail
+                if workmail_client and email.message_id:
+                    if workmail_client.mark_as_read_by_message_id(email.message_id):
+                        logger.debug(f"Marked complaint as read in WorkMail: {email.message_id}")
+                    else:
+                        logger.warning(f"Failed to mark complaint as read in WorkMail: {email.message_id}")
 
             return True
 

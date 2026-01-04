@@ -1,7 +1,7 @@
-"""Email blacklist handling for bounce notifications.
+"""Email blacklist handling for bounce and complaint notifications.
 
-Detects bounce/delivery failure notifications and adds bounced
-email addresses to the email_blacklist table.
+Detects bounce/delivery failure notifications and complaint feedback
+notifications, then adds the offending email addresses to the email_blacklist table.
 """
 
 import logging
@@ -242,6 +242,238 @@ Note: The user has NOT been automatically removed. Manual review is required.
     else:
         logger.warning(f"Failed to notify admin about bounced user: {result['error']}")
         return False
+
+
+def is_complaint_notification(sender: str, subject: str) -> bool:
+    """Check if an email is a complaint/feedback notification from SES.
+
+    Args:
+        sender: Sender email address
+        subject: Email subject line
+
+    Returns:
+        True if this appears to be an SES complaint notification
+    """
+    sender_lower = (sender or "").lower()
+
+    # Amazon SES sends complaints from this address
+    if 'complaints@email-abuse.amazonses.com' in sender_lower:
+        return True
+    if 'complaint@' in sender_lower and 'amazonses.com' in sender_lower:
+        return True
+
+    return False
+
+
+def extract_complaint_email_from_raw(raw_content: bytes) -> Optional[str]:
+    """Extract the complainant email address from raw SES complaint message.
+
+    SES complaint notifications contain the original message and feedback headers.
+
+    Args:
+        raw_content: Raw email bytes
+
+    Returns:
+        The email address that filed the complaint, or None if not found
+    """
+    import email as email_parser
+
+    try:
+        msg = email_parser.message_from_bytes(raw_content)
+
+        # Walk through MIME parts
+        if msg.is_multipart():
+            for part in msg.walk():
+                content_type = part.get_content_type()
+
+                # Look for message/feedback-report (ARF format)
+                if content_type == "message/feedback-report":
+                    try:
+                        payload = part.get_payload(decode=True)
+                        if payload:
+                            report_text = payload.decode('utf-8', errors='replace')
+                            # Look for Original-Rcpt-To header
+                            match = re.search(
+                                r'Original-Rcpt-To[:\s]+<?([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})>?',
+                                report_text,
+                                re.IGNORECASE
+                            )
+                            if match:
+                                return match.group(1).lower()
+                    except Exception:
+                        pass
+
+                # Look in text/plain parts for the complainant email
+                elif content_type == "text/plain":
+                    try:
+                        payload = part.get_payload(decode=True)
+                        if payload:
+                            text = payload.decode('utf-8', errors='replace')
+
+                            # Look for To: header in forwarded complaint
+                            match = re.search(
+                                r'\bTo[:\s]+<?([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})>?',
+                                text,
+                                re.IGNORECASE
+                            )
+                            if match:
+                                addr = match.group(1).lower()
+                                # Skip our own domain
+                                if not addr.endswith('@frflashy.com') and 'amazonses.com' not in addr:
+                                    return addr
+                    except Exception:
+                        pass
+
+                # Check message/rfc822 parts (the original email)
+                elif content_type == "message/rfc822":
+                    try:
+                        payload = part.get_payload()
+                        if payload and isinstance(payload, list):
+                            original_msg = payload[0]
+                        elif payload:
+                            original_msg = payload
+
+                        # Get To: header from original message
+                        if hasattr(original_msg, 'get'):
+                            to_header = original_msg.get('To')
+                            if to_header:
+                                match = re.search(
+                                    r'<?([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})>?',
+                                    to_header
+                                )
+                                if match:
+                                    addr = match.group(1).lower()
+                                    if not addr.endswith('@frflashy.com'):
+                                        return addr
+                    except Exception:
+                        pass
+
+    except Exception as e:
+        logger.debug(f"Error parsing raw content for complaint: {e}")
+
+    return None
+
+
+def extract_complaint_email(email_body: str, raw_content: bytes = None) -> Optional[str]:
+    """Extract the complainant email address from a complaint notification.
+
+    Args:
+        email_body: The email body text
+        raw_content: Raw email bytes (optional, for MIME parsing)
+
+    Returns:
+        The email address that filed the complaint, or None if not found
+    """
+    # First try to extract from raw MIME content (more reliable)
+    if raw_content:
+        addr = extract_complaint_email_from_raw(raw_content)
+        if addr:
+            return addr
+
+    if not email_body:
+        return None
+
+    # Patterns to find the complainant in text body
+    patterns = [
+        # To: header in forwarded content
+        r'\bTo[:\s]+<?([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})>?',
+        # Original recipient patterns
+        r'Original-Rcpt-To[:\s]+<?([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})>?',
+        r'(?:recipient|delivered to)[:\s]+<?([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})>?',
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, email_body, re.IGNORECASE)
+        if match:
+            email_addr = match.group(1).lower()
+            # Skip our own domain and system addresses
+            if (not email_addr.endswith('@frflashy.com') and
+                'amazonses.com' not in email_addr and
+                'mailer-daemon' not in email_addr):
+                return email_addr
+
+    # Fallback: find any email address that's not from our domain or system
+    all_emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', email_body)
+    for addr in all_emails:
+        addr_lower = addr.lower()
+        if (not addr_lower.endswith('@frflashy.com') and
+            'mailer-daemon' not in addr_lower and
+            'postmaster' not in addr_lower and
+            'amazonses.com' not in addr_lower):
+            return addr_lower
+
+    return None
+
+
+def handle_complaint(email, db, dry_run: bool = False, email_sender=None) -> Optional[dict]:
+    """Handle a complaint notification by extracting and blacklisting the complainant.
+
+    Args:
+        email: Email object from SESClient
+        db: Database instance
+        dry_run: If True, don't actually modify the database
+        email_sender: EmailSender instance (optional, for admin notifications)
+
+    Returns:
+        Dict with complaint handling result, or None if not a complaint
+    """
+    # Check if this is a complaint notification
+    if not is_complaint_notification(email.sender, email.subject):
+        return None
+
+    logger.info(f"Detected complaint notification: {email.subject}")
+
+    # Extract the complainant email address
+    complainant_addr = extract_complaint_email(email.body, email.raw_content)
+
+    if not complainant_addr:
+        logger.warning("Could not extract complainant email address from notification")
+        return {
+            "is_complaint": True,
+            "extracted_email": None,
+            "blacklisted": False,
+            "error": "Could not extract email address"
+        }
+
+    logger.info(f"Extracted complainant email: {complainant_addr}")
+
+    if dry_run:
+        logger.info(f"[DRY-RUN] Would blacklist complainant: {complainant_addr}")
+        return {
+            "is_complaint": True,
+            "extracted_email": complainant_addr,
+            "blacklisted": False,
+            "dry_run": True
+        }
+
+    # Add to blacklist with complaint-specific reason
+    result = add_to_blacklist(
+        db,
+        complainant_addr,
+        reason="SES complaint notification - user marked email as spam",
+        source="ses-daemon-bot"
+    )
+
+    if result:
+        if result["inserted"]:
+            logger.info(f"Added complainant to blacklist: {complainant_addr}")
+        else:
+            logger.info(f"Updated blacklist for complainant (access_cnt={result['access_cnt']}): {complainant_addr}")
+
+        return {
+            "is_complaint": True,
+            "extracted_email": complainant_addr,
+            "blacklisted": True,
+            "inserted": result["inserted"],
+            "access_cnt": result["access_cnt"]
+        }
+    else:
+        return {
+            "is_complaint": True,
+            "extracted_email": complainant_addr,
+            "blacklisted": False,
+            "error": "Failed to add to blacklist"
+        }
 
 
 def add_to_blacklist(db, email_addr: str, reason: str = "SES bounce notification",
