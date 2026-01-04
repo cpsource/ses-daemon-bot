@@ -7,6 +7,8 @@ Getting started:
 To explore FrFlashy's interactive French learning features, please create a free account by emailing admin@frflashy.com with the subject line:
 "Please create a frflashy.com account"
 
+By creating an account, you agree to our terms of service (https://frflashy.com/terms) and privacy policy (https://frflashy.com/privacy).
+
 FrFlashy focuses on:
 
 - Interactive French practice
