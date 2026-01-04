@@ -16,7 +16,7 @@ from classifier import Classifier
 from db import Database
 from blacklist import handle_bounce
 from workmail import WorkMailClient
-from handlers import EmailSender, handle_send_info
+from handlers import EmailSender, handle_send_info, handle_unknown
 
 __version__ = "0.1.0"
 
@@ -430,10 +430,14 @@ def route_to_handler(intent, email, email_sender=None, dry_run=False):
         handler_result["status"] = "pending_implementation"
 
     elif intent == Intent.UNKNOWN:
-        # Queue for manual review
-        logger.debug(f"Handler: unknown - queued for review: {email.sender}")
-        handler_result["action"] = "queue_for_review"
-        handler_result["status"] = "queued"
+        logger.debug(f"Handler: unknown for {email.sender}")
+        if email_sender:
+            handler_result = handle_unknown(email, email_sender, dry_run)
+            handler_result["intent"] = intent.label
+        else:
+            handler_result["action"] = "unknown"
+            handler_result["status"] = "error"
+            handler_result["error"] = "EmailSender not configured"
 
     else:
         # Reserved or unexpected
