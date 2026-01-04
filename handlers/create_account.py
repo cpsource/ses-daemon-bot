@@ -106,10 +106,10 @@ def create_user(db, email: str, password_hash: str, auth_code: str) -> bool:
         with db.get_cursor() as cursor:
             cursor.execute(
                 """
-                INSERT INTO users (username, email, password_hash, tier, delf_level, users_auth)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                INSERT INTO users (username, email, password_hash, tier, delf_level, users_auth, ai_tokens)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """,
-                (email, email, password_hash, 0, 0, auth_code)
+                (email, email, password_hash, 0, 0, auth_code, 5000)
             )
             return True
     except Exception as e:
