@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import AWSConfig
-from ses_client import Email, SESClient, INCOMING_PREFIX, PROCESSED_PREFIX
+from ses_client import Email, SESClient
 
 
 def test_email_dataclass():

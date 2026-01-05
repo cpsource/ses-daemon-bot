@@ -9,7 +9,7 @@ import logging
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Iterator, Optional
+from typing import Optional
 
 import psycopg2
 from psycopg2.extras import RealDictCursor

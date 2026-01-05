@@ -1,7 +1,6 @@
 """Handler for unknown intent."""
 
 import logging
-from pathlib import Path
 
 from .base import EmailSender
 

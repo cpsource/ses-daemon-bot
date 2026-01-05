@@ -5,7 +5,6 @@ Handles marking processed emails as read in WorkMail.
 
 import imaplib
 import logging
-from typing import Optional
 
 logger = logging.getLogger("ses-daemon-bot")
 

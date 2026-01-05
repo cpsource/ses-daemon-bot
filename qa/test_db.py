@@ -142,7 +142,7 @@ def test_database_get_cursor_rollback_on_error(mock_connect):
     db = Database(config)
 
     try:
-        with db.get_cursor() as cursor:
+        with db.get_cursor() as _:
             raise ValueError("test error")
     except ValueError:
         pass

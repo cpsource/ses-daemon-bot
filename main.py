@@ -230,7 +230,7 @@ def test_ses_connection(config):
 
         # Get counts
         counts = client.get_email_count_by_prefix()
-        print(f"Email counts:")
+        print("Email counts:")
         print(f"  Incoming:  {counts['incoming']}")
         print(f"  Processed: {counts['processed']}")
         print(f"  Failed:    {counts['failed']}")
