@@ -539,6 +539,39 @@ def handle_auto_reply(email, db, dry_run: bool = False) -> Optional[dict]:
         }
 
 
+def is_blacklisted(db, email_addr: str) -> Optional[dict]:
+    """Check if an email address is in the blacklist.
+
+    Args:
+        db: Database instance
+        email_addr: Email address to check
+
+    Returns:
+        Dict with blacklist info if found, None if not blacklisted or on error
+    """
+    try:
+        with db.get_cursor(commit=False) as cursor:
+            cursor.execute("""
+                SELECT email, reason, source, access_cnt, last_access_date
+                FROM email_blacklist
+                WHERE email = %s
+            """, (email_addr.lower(),))
+
+            result = cursor.fetchone()
+            if result:
+                return {
+                    "email": result["email"],
+                    "reason": result["reason"],
+                    "source": result["source"],
+                    "access_cnt": result["access_cnt"],
+                    "last_access_date": result["last_access_date"]
+                }
+            return None
+    except Exception as e:
+        logger.error(f"Failed to check blacklist for {email_addr}: {e}")
+        return None
+
+
 def add_to_blacklist(db, email_addr: str, reason: str = "SES bounce notification",
                      source: str = "ses-daemon-bot") -> Optional[dict]:
     """Add an email address to the email_blacklist table.

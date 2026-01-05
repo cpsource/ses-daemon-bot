@@ -6,6 +6,7 @@ from pathlib import Path
 
 from werkzeug.security import generate_password_hash
 
+from blacklist import is_blacklisted
 from .base import EmailSender
 
 logger = logging.getLogger("ses-daemon-bot")
@@ -131,6 +132,17 @@ def handle_create_account(email, sender: EmailSender, db, dry_run: bool = False)
     """
     user_email = email.sender
     reply_subject = email.subject or "Your inquiry"
+
+    # Check if email is blacklisted (bounced, complained, auto-reply sender)
+    blacklist_info = is_blacklisted(db, user_email)
+    if blacklist_info:
+        logger.info(f"Rejecting account creation for blacklisted email: {user_email} (reason: {blacklist_info['reason']})")
+        return {
+            "action": "create_account",
+            "status": "rejected_blacklisted",
+            "to": user_email,
+            "reason": blacklist_info["reason"],
+        }
 
     # Check if user already exists
     if check_user_exists(db, user_email):
