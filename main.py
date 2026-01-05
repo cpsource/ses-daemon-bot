@@ -14,7 +14,7 @@ from config import load_config
 from ses_client import SESClient
 from classifier import Classifier
 from db import Database
-from blacklist import handle_bounce, handle_complaint
+from blacklist import handle_bounce, handle_complaint, handle_auto_reply
 from workmail import WorkMailClient
 from handlers import EmailSender, handle_send_info, handle_unknown, handle_speak_to_human, handle_email_to_human, handle_create_account, handle_unsubscribe
 
@@ -371,6 +371,36 @@ def process_single_email(email, ses_client, classifier, db, email_sender=None, w
             else f"Email from {email.sender}: intent={result.intent_label} subject=\"{email.subject}\""
         )
 
+        # Handle spam/auto-reply specially - blacklist sender and delete from WorkMail
+        from classifier import Intent
+        if result.intent == Intent.SPAM_OR_AUTO_REPLY:
+            auto_reply_result = handle_auto_reply(email, db, dry_run)
+            if not dry_run:
+                db.save_email(
+                    message_id=email.message_id,
+                    s3_key=email.s3_key,
+                    sender=email.sender,
+                    sender_name=email.sender_name,
+                    recipient=email.recipient,
+                    subject=email.subject,
+                    body=email.body,
+                    received_at=email.received_at,
+                    intent_flags=result.intent_flags,
+                    intent_label=result.intent_label,
+                    handler_result=auto_reply_result,
+                    status="processed",
+                )
+                ses_client.mark_processed(email.s3_key)
+
+                # Delete from WorkMail (auto-replies don't need to be kept)
+                if workmail_client and email.message_id:
+                    if workmail_client.delete_by_message_id(email.message_id):
+                        logger.debug(f"Deleted auto-reply from WorkMail: {email.message_id}")
+                    else:
+                        logger.warning(f"Failed to delete auto-reply from WorkMail: {email.message_id}")
+
+            return True
+
         # Route to handler based on intent
         handler_result = route_to_handler(
             intent=result.intent,
@@ -490,8 +520,9 @@ def route_to_handler(intent, email, email_sender=None, db=None, dry_run=False):
             handler_result["error"] = "EmailSender not configured"
 
     elif intent == Intent.SPAM_OR_AUTO_REPLY:
-        # Silently ignore spam and auto-replies to avoid email loops
-        logger.info(f"Ignoring spam/auto-reply from {email.sender}")
+        # Handled earlier in process_single_email (blacklisted and deleted from WorkMail)
+        # This is a fallback that shouldn't normally be reached
+        logger.debug(f"Spam/auto-reply fallback handler for {email.sender}")
         handler_result["action"] = "ignore"
         handler_result["status"] = "ignored"
 

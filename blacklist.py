@@ -476,6 +476,69 @@ def handle_complaint(email, db, dry_run: bool = False, email_sender=None) -> Opt
         }
 
 
+def handle_auto_reply(email, db, dry_run: bool = False) -> Optional[dict]:
+    """Handle an auto-reply by blacklisting the sender.
+
+    Args:
+        email: Email object from SESClient
+        db: Database instance
+        dry_run: If True, don't actually modify the database
+
+    Returns:
+        Dict with auto-reply handling result
+    """
+    sender_addr = email.sender.lower() if email.sender else None
+
+    if not sender_addr:
+        logger.warning("No sender address for auto-reply")
+        return {
+            "is_auto_reply": True,
+            "extracted_email": None,
+            "blacklisted": False,
+            "error": "No sender address"
+        }
+
+    logger.info(f"Blacklisting auto-reply sender: {sender_addr}")
+
+    if dry_run:
+        logger.info(f"[DRY-RUN] Would blacklist auto-reply sender: {sender_addr}")
+        return {
+            "is_auto_reply": True,
+            "extracted_email": sender_addr,
+            "blacklisted": False,
+            "dry_run": True
+        }
+
+    # Add to blacklist with auto-reply-specific reason
+    result = add_to_blacklist(
+        db,
+        sender_addr,
+        reason="Auto-reply sender - avoid email loops",
+        source="ses-daemon-bot"
+    )
+
+    if result:
+        if result["inserted"]:
+            logger.info(f"Added auto-reply sender to blacklist: {sender_addr}")
+        else:
+            logger.info(f"Updated blacklist for auto-reply sender (access_cnt={result['access_cnt']}): {sender_addr}")
+
+        return {
+            "is_auto_reply": True,
+            "extracted_email": sender_addr,
+            "blacklisted": True,
+            "inserted": result["inserted"],
+            "access_cnt": result["access_cnt"]
+        }
+    else:
+        return {
+            "is_auto_reply": True,
+            "extracted_email": sender_addr,
+            "blacklisted": False,
+            "error": "Failed to add to blacklist"
+        }
+
+
 def add_to_blacklist(db, email_addr: str, reason: str = "SES bounce notification",
                      source: str = "ses-daemon-bot") -> Optional[dict]:
     """Add an email address to the email_blacklist table.
