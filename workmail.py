@@ -60,12 +60,13 @@ class WorkMailClient:
                 pass
             self._connection = None
 
-    def mark_as_read_by_message_id(self, message_id: str, mailbox: str = "INBOX") -> bool:
+    def mark_as_read_by_message_id(self, message_id: str, mailbox: str = "INBOX", _retry: bool = True) -> bool:
         """Mark an email as read by its Message-ID header.
 
         Args:
             message_id: The Message-ID header value
             mailbox: Mailbox to search (default: INBOX)
+            _retry: Internal flag to prevent infinite retry loops
 
         Returns:
             True if found and marked, False otherwise
@@ -108,16 +109,25 @@ class WorkMailClient:
 
             return True
 
+        except (imaplib.IMAP4.abort, imaplib.IMAP4.error, OSError) as e:
+            # Connection was lost (inactivity timeout, network issue, etc.)
+            logger.debug(f"IMAP connection error, reconnecting: {e}")
+            self._connection = None
+            if _retry and self.connect():
+                return self.mark_as_read_by_message_id(message_id, mailbox, _retry=False)
+            logger.error(f"Error marking email as read after reconnect: {e}")
+            return False
         except Exception as e:
             logger.error(f"Error marking email as read: {e}")
             return False
 
-    def delete_by_message_id(self, message_id: str, mailbox: str = "INBOX") -> bool:
+    def delete_by_message_id(self, message_id: str, mailbox: str = "INBOX", _retry: bool = True) -> bool:
         """Delete an email by its Message-ID header.
 
         Args:
             message_id: The Message-ID header value
             mailbox: Mailbox to search (default: INBOX)
+            _retry: Internal flag to prevent infinite retry loops
 
         Returns:
             True if found and deleted, False otherwise
@@ -159,6 +169,14 @@ class WorkMailClient:
 
             return True
 
+        except (imaplib.IMAP4.abort, imaplib.IMAP4.error, OSError) as e:
+            # Connection was lost (inactivity timeout, network issue, etc.)
+            logger.debug(f"IMAP connection error, reconnecting: {e}")
+            self._connection = None
+            if _retry and self.connect():
+                return self.delete_by_message_id(message_id, mailbox, _retry=False)
+            logger.error(f"Error deleting email after reconnect: {e}")
+            return False
         except Exception as e:
             logger.error(f"Error deleting email: {e}")
             return False
