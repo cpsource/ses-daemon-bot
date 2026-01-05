@@ -18,7 +18,7 @@ from blacklist import handle_bounce, handle_complaint, handle_auto_reply
 from workmail import WorkMailClient
 from handlers import EmailSender, handle_send_info, handle_unknown, handle_speak_to_human, handle_email_to_human, handle_create_account, handle_unsubscribe
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 
 logger = logging.getLogger("ses-daemon-bot")
 
