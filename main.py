@@ -14,11 +14,11 @@ from config import load_config
 from ses_client import SESClient
 from classifier import Classifier
 from db import Database
-from blacklist import handle_bounce, handle_complaint, handle_auto_reply
+from blacklist import handle_bounce, handle_complaint, handle_auto_reply, handle_dmarc_report
 from workmail import WorkMailClient
 from handlers import EmailSender, handle_send_info, handle_unknown, handle_speak_to_human, handle_email_to_human, handle_create_account, handle_unsubscribe
 
-__version__ = "0.1.3"
+__version__ = "0.1.4"
 
 logger = logging.getLogger("ses-daemon-bot")
 
@@ -354,6 +354,36 @@ def process_single_email(email, ses_client, classifier, db, email_sender=None, w
                         logger.debug(f"Deleted complaint from WorkMail: {email.message_id}")
                     else:
                         logger.warning(f"Failed to delete complaint from WorkMail: {email.message_id}")
+
+            return True
+
+        # Step 2.7: Check for DMARC reports (don't reply to these)
+        dmarc_result = handle_dmarc_report(email, db, dry_run)
+        if dmarc_result:
+            # This is a DMARC report - store it without sending any reply
+            if not dry_run:
+                db.save_email(
+                    message_id=email.message_id,
+                    s3_key=email.s3_key,
+                    sender=email.sender,
+                    sender_name=email.sender_name,
+                    recipient=email.recipient,
+                    subject=email.subject,
+                    body=email.body,
+                    received_at=email.received_at,
+                    intent_flags=[False, False, False, False, False, False, False, False],  # No intent classification
+                    intent_label="dmarc_report",
+                    handler_result=dmarc_result,
+                    status="processed",
+                )
+                ses_client.mark_processed(email.s3_key)
+
+                # Delete from WorkMail (DMARC reports don't need to be kept in inbox)
+                if workmail_client and email.message_id:
+                    if workmail_client.delete_by_message_id(email.message_id):
+                        logger.debug(f"Deleted DMARC report from WorkMail: {email.message_id}")
+                    else:
+                        logger.warning(f"Failed to delete DMARC report from WorkMail: {email.message_id}")
 
             return True
 

@@ -244,6 +244,77 @@ Note: The user has NOT been automatically removed. Manual review is required.
         return False
 
 
+def is_dmarc_report(sender: str, subject: str) -> bool:
+    """Check if an email is a DMARC aggregate or forensic report.
+
+    These are automated reports from mail providers (Google, Yahoo, Microsoft, etc.)
+    and should not be replied to.
+
+    Args:
+        sender: Sender email address
+        subject: Email subject line
+
+    Returns:
+        True if this appears to be a DMARC report
+    """
+    sender_lower = (sender or "").lower()
+    subject_lower = (subject or "").lower()
+
+    # Known DMARC report senders
+    dmarc_senders = [
+        'dmarc@',
+        'dmarc-',
+        'dmarcreport@',
+        'noreply-dmarc',
+        'dmarc.yahoo.com',
+        'dmarc-support@google.com',
+        'postmaster.aol.com',
+    ]
+
+    for pattern in dmarc_senders:
+        if pattern in sender_lower:
+            return True
+
+    # Check subject for DMARC indicators
+    dmarc_subject_patterns = [
+        'report domain:',
+        'dmarc aggregate report',
+        'dmarc forensic report',
+        'dmarc report',
+    ]
+
+    for pattern in dmarc_subject_patterns:
+        if pattern in subject_lower:
+            return True
+
+    return False
+
+
+def handle_dmarc_report(email, db, dry_run: bool = False) -> dict:
+    """Handle a DMARC report by logging it without sending any reply.
+
+    Args:
+        email: Email object from SESClient
+        db: Database instance
+        dry_run: If True, don't actually modify the database
+
+    Returns:
+        Dict with DMARC report handling result, or None if not a DMARC report
+    """
+    # Check if this is a DMARC report
+    if not is_dmarc_report(email.sender, email.subject):
+        return None
+
+    logger.info(f"Detected DMARC report from {email.sender}: {email.subject[:50]}...")
+
+    return {
+        "is_dmarc_report": True,
+        "sender": email.sender,
+        "action": "logged",
+        "note": "DMARC reports are informational - no reply sent"
+    }
+
+
 def is_complaint_notification(sender: str, subject: str) -> bool:
     """Check if an email is a complaint/feedback notification from SES.
 
